@@ -124,6 +124,7 @@ class Database:
                     CREATE TABLE IF NOT EXISTS websites (
                         id TEXT PRIMARY KEY,
                         name TEXT NOT NULL UNIQUE,
+                        display_name TEXT NOT NULL DEFAULT '',
                         url TEXT NOT NULL,
                         category TEXT DEFAULT 'General',
                         description TEXT DEFAULT '',
@@ -131,13 +132,20 @@ class Database:
                         last_successful_access TEXT,
                         access_count INTEGER DEFAULT 0,
                         auth_status TEXT DEFAULT 'none',
-                        navigation_procedure TEXT DEFAULT 'direct_url',
-                        is_verified INTEGER DEFAULT 1,
+                        navigation_procedure TEXT DEFAULT '',
+                        is_verified INTEGER DEFAULT 0,
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL
                     );
                     """
                 )
+
+                # Migration: Ensure display_name column exists
+                cursor.execute("PRAGMA table_info(websites);")
+                columns = [col[1] for col in cursor.fetchall()]
+                if "display_name" not in columns:
+                    cursor.execute("ALTER TABLE websites ADD COLUMN display_name TEXT DEFAULT '';")
+                    cursor.execute("UPDATE websites SET display_name = name WHERE display_name = '';")
 
                 # AI Provider Preferences table (Phase 4)
                 cursor.execute(
@@ -189,12 +197,27 @@ class Database:
                 cursor.execute(
                     "CREATE INDEX IF NOT EXISTS idx_ai_logs_provider ON ai_connection_logs(provider, tested_at DESC);"
                 )
-                cursor.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_websites_url ON websites(url);"
-                )
 
-                # Seed initial default websites
-                self._seed_initial_websites(cursor)
+                # Seed initial verified websites (Section 3 of Phase 3 Requirements)
+                seed_websites = [
+                    ("chatgpt", "ChatGPT", "https://chatgpt.com/", "AI Assistant", "OpenAI conversational assistant", "required"),
+                    ("gemini", "Gemini", "https://gemini.google.com/", "AI Assistant", "Google Gemini conversational assistant", "required"),
+                    ("gmail", "Gmail", "https://mail.google.com/", "Communication", "Google Webmail service", "required"),
+                    ("google", "Google", "https://www.google.com/", "Search Engine", "Google Search Engine", "none"),
+                    ("google drive", "Google Drive", "https://drive.google.com/", "Cloud Storage", "Google Cloud Storage and Documents", "required"),
+                    ("youtube", "YouTube", "https://www.youtube.com/", "Media", "Online Video Streaming", "none"),
+                ]
+                now_str = utc_now_iso()
+                for w_name, w_disp, w_url, w_cat, w_desc, w_auth in seed_websites:
+                    cursor.execute(
+                        """
+                        INSERT OR IGNORE INTO websites (
+                            id, name, display_name, url, category, description,
+                            auth_status, is_verified, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                        """,
+                        (str(uuid.uuid4()), w_name, w_disp, w_url, w_cat, w_desc, w_auth, now_str, now_str)
+                    )
             logger.info("Database schema verified successfully.")
         finally:
             conn.close()
@@ -498,203 +521,101 @@ class Database:
 
     # ---------------- Website Registry (Phase 3) ----------------
 
-    def _seed_initial_websites(self, cursor: sqlite3.Cursor) -> None:
-        """Seed default known websites into website registry if not already present."""
-        initial_sites = [
-            {
-                "name": "chatgpt",
-                "url": "https://chatgpt.com/",
-                "category": "AI Assistant",
-                "description": "OpenAI ChatGPT conversational AI web interface",
-                "auth_status": "login_supported",
-            },
-            {
-                "name": "gemini",
-                "url": "https://gemini.google.com/",
-                "category": "AI Assistant",
-                "description": "Google Gemini conversational AI assistant",
-                "auth_status": "login_supported",
-            },
-            {
-                "name": "gmail",
-                "url": "https://mail.google.com/",
-                "category": "Email & Productivity",
-                "description": "Google Mail web application",
-                "auth_status": "login_required",
-            },
-            {
-                "name": "google",
-                "url": "https://www.google.com/",
-                "category": "Search Engine",
-                "description": "Google Web Search engine",
-                "auth_status": "none",
-            },
-            {
-                "name": "google drive",
-                "url": "https://drive.google.com/",
-                "category": "Cloud Storage & Productivity",
-                "description": "Google Drive cloud file storage and office tools",
-                "auth_status": "login_required",
-            },
-            {
-                "name": "youtube",
-                "url": "https://www.youtube.com/",
-                "category": "Media & Video",
-                "description": "YouTube video sharing and streaming platform",
-                "auth_status": "none",
-            },
-        ]
-        now = utc_now_iso()
-        for site in initial_sites:
-            cursor.execute("SELECT id FROM websites WHERE name = ?", (site["name"],))
-            if not cursor.fetchone():
-                cursor.execute(
-                    """
-                    INSERT INTO websites (
-                        id, name, url, category, description,
-                        preferred_browser, auth_status, navigation_procedure,
-                        is_verified, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        str(uuid.uuid4()),
-                        site["name"],
-                        site["url"],
-                        site["category"],
-                        site["description"],
-                        "",
-                        site["auth_status"],
-                        "direct_url",
-                        1,
-                        now,
-                        now,
-                    ),
-                )
-
     def upsert_website(
         self,
         name: str,
+        display_name: str,
         url: str,
         category: str = "General",
         description: str = "",
         preferred_browser: str = "",
         auth_status: str = "none",
-        navigation_procedure: str = "direct_url",
-        is_verified: bool = True,
-    ) -> Dict[str, Any]:
-        """Insert or update a website entry in the persistent website registry."""
-        clean_name = name.strip().lower()
-        clean_url = url.strip()
+        navigation_procedure: str = "",
+        is_verified: int = 1,
+    ) -> str:
+        """Insert or update a registered website in SQLite knowledge store."""
         now = utc_now_iso()
+        site_id = str(uuid.uuid4())
+        name_clean = name.strip().lower()
+
         conn = self._get_connection()
         try:
             with conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT id FROM websites WHERE name = ?", (clean_name,))
-                existing = cursor.fetchone()
-                if existing:
-                    site_id = existing["id"]
-                    cursor.execute(
-                        """
-                        UPDATE websites
-                        SET url = ?,
-                            category = ?,
-                            description = ?,
-                            preferred_browser = ?,
-                            auth_status = ?,
-                            navigation_procedure = ?,
-                            is_verified = ?,
-                            updated_at = ?
-                        WHERE id = ?
-                        """,
-                        (
-                            clean_url,
-                            category,
-                            description,
-                            preferred_browser,
-                            auth_status,
-                            navigation_procedure,
-                            1 if is_verified else 0,
-                            now,
-                            site_id,
-                        ),
-                    )
-                else:
-                    site_id = str(uuid.uuid4())
-                    cursor.execute(
-                        """
-                        INSERT INTO websites (
-                            id, name, url, category, description,
-                            preferred_browser, auth_status, navigation_procedure,
-                            is_verified, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            site_id,
-                            clean_name,
-                            clean_url,
-                            category,
-                            description,
-                            preferred_browser,
-                            auth_status,
-                            navigation_procedure,
-                            1 if is_verified else 0,
-                            now,
-                            now,
-                        ),
-                    )
-
-                cursor.execute("SELECT * FROM websites WHERE id = ?", (site_id,))
-                return dict(cursor.fetchone())
+                conn.execute(
+                    """
+                    INSERT INTO websites (
+                        id, name, display_name, url, category, description,
+                        preferred_browser, auth_status, navigation_procedure,
+                        is_verified, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(name) DO UPDATE SET
+                        display_name = excluded.display_name,
+                        url = excluded.url,
+                        category = excluded.category,
+                        description = excluded.description,
+                        preferred_browser = CASE WHEN excluded.preferred_browser != '' THEN excluded.preferred_browser ELSE websites.preferred_browser END,
+                        auth_status = excluded.auth_status,
+                        navigation_procedure = CASE WHEN excluded.navigation_procedure != '' THEN excluded.navigation_procedure ELSE websites.navigation_procedure END,
+                        is_verified = excluded.is_verified,
+                        updated_at = excluded.updated_at;
+                    """,
+                    (
+                        site_id, name_clean, display_name, url, category, description,
+                        preferred_browser, auth_status, navigation_procedure,
+                        is_verified, now, now
+                    ),
+                )
+            logger.debug(f"Upserted website: '{name_clean}' -> {url}")
+            return site_id
         finally:
             conn.close()
 
     def get_website_by_name(self, name: str) -> Optional[Dict[str, Any]]:
-        """Fetch website by its unique name/identifier."""
-        clean = name.strip().lower()
+        """Fetch website record by case-insensitive name."""
+        name_clean = name.strip().lower()
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM websites WHERE name = ?", (clean,))
+            cursor.execute("SELECT * FROM websites WHERE name = ?", (name_clean,))
             row = cursor.fetchone()
-            if row:
-                return dict(row)
-            # Try fuzzy match
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def search_websites(self, query: str) -> List[Dict[str, Any]]:
+        """Fuzzy search websites by name, display name, url, or description."""
+        q = f"%{query.strip().lower()}%"
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
             cursor.execute(
-                "SELECT * FROM websites WHERE name LIKE ? OR description LIKE ? LIMIT 1",
-                (f"%{clean}%", f"%{clean}%"),
+                """
+                SELECT * FROM websites
+                WHERE name LIKE ? OR display_name LIKE ? OR url LIKE ? OR description LIKE ?
+                ORDER BY access_count DESC, display_name ASC
+                """,
+                (q, q, q, q),
             )
-            row = cursor.fetchone()
-            return dict(row) if row else None
-        finally:
-            conn.close()
-
-    def get_website_by_url(self, url: str) -> Optional[Dict[str, Any]]:
-        """Fetch website by its URL (or prefix)."""
-        clean = url.strip().rstrip("/")
-        conn = self._get_connection()
-        try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM websites WHERE url = ? OR url = ?", (clean, clean + "/"))
-            row = cursor.fetchone()
-            return dict(row) if row else None
-        finally:
-            conn.close()
-
-    def get_all_websites(self) -> List[Dict[str, Any]]:
-        """Fetch all websites in registry ordered by name."""
-        conn = self._get_connection()
-        try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM websites ORDER BY name ASC")
             rows = cursor.fetchall()
             return [dict(row) for row in rows]
         finally:
             conn.close()
 
-    def record_website_access_success(self, site_id_or_name: str) -> None:
-        """Record successful website access, increment counter, mark verified."""
+    def get_all_websites(self) -> List[Dict[str, Any]]:
+        """Fetch all registered websites."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM websites ORDER BY access_count DESC, display_name ASC")
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def record_website_access_success(self, name_or_id: str) -> None:
+        """Record successful website visit, increment access count, and update timestamp."""
         now = utc_now_iso()
+        name_clean = name_or_id.strip().lower()
         conn = self._get_connection()
         try:
             with conn:
@@ -707,20 +628,17 @@ class Database:
                         updated_at = ?
                     WHERE id = ? OR name = ?
                     """,
-                    (now, now, site_id_or_name, site_id_or_name.lower()),
+                    (now, now, name_or_id, name_clean),
                 )
         finally:
             conn.close()
 
-    def delete_website(self, site_id_or_name: str) -> None:
-        """Delete a website from the registry."""
+    def delete_website(self, site_id: str) -> None:
+        """Delete website from registry."""
         conn = self._get_connection()
         try:
             with conn:
-                conn.execute(
-                    "DELETE FROM websites WHERE id = ? OR name = ?",
-                    (site_id_or_name, site_id_or_name.lower()),
-                )
+                conn.execute("DELETE FROM websites WHERE id = ? OR name = ?", (site_id, site_id.lower()))
         finally:
             conn.close()
 
@@ -741,7 +659,6 @@ class Database:
         try:
             with conn:
                 if is_default:
-                    # Clear default flag on others
                     conn.execute("UPDATE ai_provider_preferences SET is_default = 0")
 
                 conn.execute(

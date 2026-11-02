@@ -6,8 +6,8 @@ Prevents execution of unrestricted browser scripts or terminal commands.
 
 from typing import Any, Callable, Dict, List, Optional
 
-from bolt.browser.browser_detection import get_browser_detector
-from bolt.browser.navigator import get_browser_navigator
+from bolt.browser.browser_detector import get_browser_detector
+from bolt.browser.browser_controller import get_browser_controller
 from bolt.browser.website_registry import get_website_registry
 from bolt.core.logger import get_logger
 
@@ -66,7 +66,7 @@ class ToolRegistry:
             return {"success": False, "error": str(e)}
 
     def _register_default_tools(self) -> None:
-        navigator = get_browser_navigator()
+        controller = get_browser_controller()
         registry = get_website_registry()
         detector = get_browser_detector()
 
@@ -88,7 +88,7 @@ class ToolRegistry:
                 },
                 "required": ["website_name_or_url"],
             },
-            handler=lambda website_name_or_url, browser="": navigator.navigate_single(website_name_or_url, preferred_browser=browser).__dict__,
+            handler=lambda website_name_or_url, browser="": controller.open_url(website_name_or_url, preferred_browser=browser),
         )
 
         # 2. open_multiple_tabs
@@ -103,14 +103,10 @@ class ToolRegistry:
                         "items": {"type": "string"},
                         "description": "List of website names or URLs to open.",
                     },
-                    "browser": {
-                        "type": "string",
-                        "description": "Optional preferred browser name.",
-                    },
                 },
                 "required": ["websites"],
             },
-            handler=lambda websites, browser="": navigator.navigate_multi_tabs(websites, preferred_browser=browser).__dict__,
+            handler=lambda websites: controller.open_multiple_urls(websites),
         )
 
         # 3. search_web
@@ -131,7 +127,7 @@ class ToolRegistry:
                 },
                 "required": ["query"],
             },
-            handler=lambda query, provider="bing": navigator.execute_search(query, provider=provider).__dict__,
+            handler=lambda query, provider="google": controller.search_web(query, provider=provider),
         )
 
         # 4. read_webpage
@@ -147,7 +143,7 @@ class ToolRegistry:
                     },
                 },
             },
-            handler=lambda url="": navigator.read_and_summarize_page(url).__dict__,
+            handler=lambda url="": controller.read_current_page(url=url if url else None),
         )
 
         # 5. switch_browser_tab
@@ -164,7 +160,7 @@ class ToolRegistry:
                 },
                 "required": ["tab_name"],
             },
-            handler=lambda tab_name: navigator.switch_to_tab(tab_name).__dict__,
+            handler=lambda tab_name: controller.switch_to_tab(tab_name),
         )
 
         # 6. list_installed_browsers
@@ -172,7 +168,7 @@ class ToolRegistry:
             name="list_installed_browsers",
             description="List all web browsers installed on the local system with active process state.",
             parameters={"type": "object", "properties": {}},
-            handler=lambda: [b.to_dict() for b in detector.detect_installed_browsers()],
+            handler=lambda: list(detector.detect_installed_browsers().values()),
         )
 
         # 7. list_known_websites
@@ -180,7 +176,7 @@ class ToolRegistry:
             name="list_known_websites",
             description="Fetch all registered websites and URLs in BOLT's persistent memory.",
             parameters={"type": "object", "properties": {}},
-            handler=lambda: [w.to_dict() for w in registry.get_all_registered_websites()],
+            handler=lambda: registry.list_websites(),
         )
 
 

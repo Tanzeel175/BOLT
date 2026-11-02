@@ -265,10 +265,10 @@ class ChatView(QScrollArea):
         sug_layout.setSpacing(10)
 
         prompts = [
+            "Open ChatGPT",
             "Open Notepad",
-            "List running applications",
+            "Search for Python AI libraries",
             "System specifications",
-            "Explain recursion in C++",
         ]
 
         for p in prompts:

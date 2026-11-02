@@ -1,7 +1,8 @@
 """
-Natural Language Windows Intent Dispatcher for BOLT.
+Natural Language Windows & Browser Intent Dispatcher for BOLT.
 Translates user instructions into Windows operations (Application Control, Window Management,
-File Operations, and System Telemetry).
+File Operations, Hardware Telemetry) and Browser/Website operations (Multi-tab Navigation,
+Web Search, Tab Switching, Webpage Summarization).
 """
 
 import re
@@ -13,6 +14,8 @@ from bolt.windows.app_controller import AppController, get_app_controller
 from bolt.windows.file_manager import FileManager, get_file_manager
 from bolt.windows.system_info import SystemInfo
 from bolt.windows.window_manager import WindowManager, get_window_manager
+from bolt.browser.browser_controller import BrowserController, get_browser_controller
+from bolt.browser.search_engine import SearchEngine
 
 logger = get_logger("IntentDispatcher")
 
@@ -28,46 +31,29 @@ class IntentResult:
 
 
 class WindowsIntentDispatcher:
-    """Classifies natural language instructions and executes corresponding Windows and Browser actions."""
+    """Classifies natural language instructions and executes corresponding operations."""
 
     def __init__(
         self,
         app_controller: Optional[AppController] = None,
         window_mgr: Optional[WindowManager] = None,
         file_mgr: Optional[FileManager] = None,
-        navigator: Optional[Any] = None,
-        website_registry: Optional[Any] = None,
-        browser_detector: Optional[Any] = None,
+        browser_controller: Optional[BrowserController] = None,
     ):
         self.app_controller = app_controller or get_app_controller()
         self.window_mgr = window_mgr or get_window_manager()
         self.file_mgr = file_mgr or get_file_manager()
-
-        if navigator is None:
-            from bolt.browser.navigator import get_browser_navigator
-            self.navigator = get_browser_navigator()
-        else:
-            self.navigator = navigator
-
-        if website_registry is None:
-            from bolt.browser.website_registry import get_website_registry
-            self.website_registry = get_website_registry()
-        else:
-            self.website_registry = website_registry
-
-        if browser_detector is None:
-            from bolt.browser.browser_detection import get_browser_detector
-            self.browser_detector = get_browser_detector()
-        else:
-            self.browser_detector = browser_detector
+        self.browser_controller = browser_controller or get_browser_controller()
 
     def dispatch(self, text: str) -> IntentResult:
-        """Analyze text and execute matching Windows operation if detected."""
+        """Analyze text and execute matching Windows or Browser operation if detected."""
         clean = text.strip()
         lower = clean.lower()
 
         # Remove polite prefix or assistant name if present (e.g., "BOLT, open notepad" -> "open notepad")
         lower_stripped = re.sub(r"^(bolt|hey bolt|please|can you|could you)\s*[,:]?\s*", "", lower).strip()
+        # Remove trailing period or question mark for pattern matching
+        lower_stripped = lower_stripped.rstrip(".?!").strip()
 
         # ---------------- 1. System Telemetry & Specs ----------------
         system_keywords = [
@@ -142,6 +128,172 @@ class WindowsIntentDispatcher:
                 content=content,
             )
 
+        # ---------------- Phase 3: Webpage Reading & Content Summarization ----------------
+        if any(k in lower_stripped for k in [
+            "read the current webpage", "read current webpage", "read this webpage",
+            "summarize the current webpage", "summarize current webpage", "summarize this page",
+            "read the webpage", "read webpage and summarize", "read current page"
+        ]):
+            res = self.browser_controller.read_current_page()
+            if res["success"]:
+                return IntentResult(
+                    is_windows_action=True,
+                    action_type="read_webpage",
+                    success=True,
+                    title=f"Webpage: {res.get('title', 'Content')}",
+                    content=res.get("summary", ""),
+                )
+            else:
+                return IntentResult(
+                    is_windows_action=True,
+                    action_type="read_webpage",
+                    success=False,
+                    title="Read Webpage Error",
+                    content=f"⚠️ {res.get('error', 'Could not read webpage content.')}",
+                )
+
+        # ---------------- Phase 3: Tab Management ----------------
+        switch_tab_match = re.match(
+            r"^(?:switch\s+to|focus|bring\s+to\s+front)\s+(?:the\s+)?([^\n]+?)\s+tab$",
+            lower_stripped,
+        )
+        if switch_tab_match:
+            target_tab = switch_tab_match.group(1).strip()
+            res = self.browser_controller.switch_to_tab(target_tab)
+            if res["success"]:
+                content = f"🪟 **{res['message']}**"
+            else:
+                content = f"⚠️ {res['error']}"
+
+            return IntentResult(
+                is_windows_action=True,
+                action_type="switch_tab",
+                success=res["success"],
+                title=f"Tab: {target_tab}",
+                content=content,
+            )
+
+        if lower_stripped in ["close tab", "close the tab", "close active tab", "close current tab"]:
+            res = self.browser_controller.close_tab()
+            if res["success"]:
+                content = f"⏹ **{res['message']}**"
+            else:
+                content = f"⚠️ {res['error']}"
+
+            return IntentResult(
+                is_windows_action=True,
+                action_type="close_tab",
+                success=res["success"],
+                title="Close Tab",
+                content=content,
+            )
+
+        if any(k in lower_stripped for k in ["list open tabs", "list tabs", "show tabs", "open tabs"]):
+            tabs = self.browser_controller.get_open_tabs()
+            if not tabs:
+                content = "No browser tabs currently managed by BOLT."
+            else:
+                rows = [
+                    f"- Tab {t['index'] + 1}: **[{t['title']}]({t['url']})** {'*(active)*' if t['is_active'] else ''}"
+                    for t in tabs
+                ]
+                content = f"### 📑 Open Browser Tabs ({len(tabs)})\n\n" + "\n".join(rows)
+
+            return IntentResult(
+                is_windows_action=True,
+                action_type="list_tabs",
+                success=True,
+                title="Open Tabs",
+                content=content,
+            )
+
+        # ---------------- Phase 3: Multi-Website Navigation in Separate Tabs ----------------
+        multi_tab_match = re.match(
+            r"^(?:open|visit|launch)\s+([a-zA-Z0-9\s\-]+?)\s+and\s+([a-zA-Z0-9\s\-]+?)(?:\s+in\s+separate\s+tabs|\s+in\s+tabs|\s+together)?$",
+            lower_stripped,
+        )
+        if multi_tab_match and "search" not in lower_stripped:
+            site1_raw = multi_tab_match.group(1).strip()
+            site2_raw = multi_tab_match.group(2).strip()
+            reg = self.browser_controller.registry
+
+            # Check if both candidate names resolve as websites or URLs
+            s1_rec = bool(reg.resolve_website(site1_raw) or reg.is_valid_url(site1_raw))
+            s2_rec = bool(reg.resolve_website(site2_raw) or reg.is_valid_url(site2_raw))
+
+            if s1_rec and s2_rec:
+                results = self.browser_controller.open_multiple_urls([site1_raw, site2_raw])
+                lines = ["### 🌐 Opened Websites in Separate Tabs\n"]
+                all_ok = True
+                for r in results:
+                    if r["success"]:
+                        badge = "ℹ️" if r.get("action") == "reused_tab" else "✅"
+                        lines.append(f"- {badge} **{r.get('display_name', 'Site')}**: `{r.get('url', '')}`")
+                    else:
+                        all_ok = False
+                        lines.append(f"- ⚠️ **Failed**: {r.get('error')}")
+
+                return IntentResult(
+                    is_windows_action=True,
+                    action_type="multi_browser_nav",
+                    success=all_ok,
+                    title="Opened Multiple Tabs",
+                    content="\n".join(lines),
+                )
+
+        # ---------------- Phase 3: Site-Specific Search (YouTube / Google / GitHub) ----------------
+        site_search_match = re.match(
+            r"^(?:open\s+)?(youtube|google|duckduckgo|bing|github)\s+and\s+search\s+(?:for\s+)?([^\n]+)$",
+            lower_stripped,
+        ) or re.match(
+            r"^search\s+(youtube|google|duckduckgo|bing|github)\s+for\s+([^\n]+)$",
+            lower_stripped,
+        )
+        if site_search_match:
+            provider = site_search_match.group(1).strip()
+            query = site_search_match.group(2).strip()
+            search_url = SearchEngine.build_search_url(query, provider)
+            nav_res = self.browser_controller.open_url(search_url)
+
+            content = (
+                f"🔍 **Searching {provider.title()} for:** *\"{query}\"*\n\n"
+                f"🔗 Direct Search URL: [{search_url}]({search_url})\n\n"
+                f"✅ **{nav_res.get('message', 'Opened search in browser.')}**"
+            )
+            return IntentResult(
+                is_windows_action=True,
+                action_type="site_search",
+                success=nav_res["success"],
+                title=f"{provider.title()} Search: {query}",
+                content=content,
+            )
+
+        # ---------------- Phase 3: General Internet Search ----------------
+        is_web_search = (
+            lower_stripped.startswith("search for ")
+            or lower_stripped.startswith("search the web for ")
+            or lower_stripped.startswith("search the internet for ")
+            or lower_stripped.startswith("search online for ")
+            or lower_stripped.startswith("google ")
+            or lower_stripped.startswith("find a website for ")
+        )
+        # Avoid intercepting local file search queries (e.g. "search for file notes.txt")
+        if is_web_search and not any(term in lower_stripped for term in [".txt", ".py", ".pdf", ".doc", "file"]):
+            clean_search_query = re.sub(
+                r"^(search\s+for|search\s+the\s+web\s+for|search\s+the\s+internet\s+for|search\s+online\s+for|google|find\s+a\s+website\s+for)\s+",
+                "",
+                lower_stripped,
+            ).strip()
+
+            search_res = self.browser_controller.search_web(clean_search_query, provider="google")
+            return IntentResult(
+                is_windows_action=True,
+                action_type="web_search",
+                success=True,
+                title=f"Search: {clean_search_query}",
+                content=search_res.get("summary_md", ""),
+            )
+
         # ---------------- 4. Open Folder / Directory ----------------
         folder_match = re.match(
             r"^(open|show|explore)\s+(my\s+)?(folder\s+)?([\w\s\\/:\-]+?)(?:\s+folder)?$",
@@ -149,7 +301,6 @@ class WindowsIntentDispatcher:
         )
         if folder_match:
             candidate = folder_match.group(4).strip()
-            # If candidate matches a known folder alias or path
             resolved_folder = FileManager.resolve_folder_alias(candidate)
             if resolved_folder:
                 res = FileManager.open_item(str(resolved_folder))
@@ -169,13 +320,8 @@ class WindowsIntentDispatcher:
         )
         if search_match:
             query = search_match.group(2).strip()
-            # Distinguish file searches from general web searches
-            has_file_kw = any(w in lower_stripped.split() for w in ["file", "files", "document", "documents"])
-            has_file_ext = bool(re.search(r"\.(pdf|txt|docx?|xlsx?|csv|json|png|jpg|exe)\b", query))
-            is_web_search = any(w in query for w in ["latest", "ai", "libraries", "tools", "tutorial", "online", "web", "website", "news"])
-
-            if (has_file_kw or has_file_ext) and not is_web_search:
-                clean_query = re.sub(r"\b(files?|documents?)\b", "", query).strip()
+            if any(term in query for term in [".", "file", "document", "pdf", "txt", "py", "doc"]):
+                clean_query = query.replace("file", "").strip()
                 files = FileManager.search_files(clean_query, max_results=8)
                 if not files:
                     content = f"🔍 No files found matching `*{clean_query}*` in common directories."
@@ -197,45 +343,71 @@ class WindowsIntentDispatcher:
                     content=content,
                 )
 
-        # ---------------- 6. Switch to Application / Window / Browser Tab / AI Provider ----------------
+        # ---------------- Phase 4: Switch AI Provider ----------------
+        if any(k in lower_stripped for k in [
+            "switch to gemini", "switch to openai", "switch to chatgpt",
+            "switch default provider", "switch provider", "switch to mock", "switch to local"
+        ]):
+            from bolt.ai.provider_manager import get_provider_manager
+            pm = get_provider_manager()
+            target_p = (
+                "gemini" if "gemini" in lower_stripped
+                else "openai" if ("openai" in lower_stripped or "chatgpt" in lower_stripped)
+                else "mock"
+            )
+            ok, msg = pm.switch_default_provider(target_p)
+            return IntentResult(
+                is_windows_action=True,
+                action_type="switch_ai_provider",
+                success=ok,
+                title=f"Switch AI Provider: {target_p.title()}",
+                content=msg,
+            )
+
+        # ---------------- Phase 4: Multi-AI Comparison ----------------
+        if lower_stripped.startswith("compare ") and any(p in lower_stripped for p in ["gemini", "chatgpt", "openai"]):
+            from bolt.ai.multi_ai import get_multi_ai_comparator
+            comparator = get_multi_ai_comparator()
+            prompt_clean = re.sub(
+                r"^compare\s+(?:how\s+)?(?:gemini\s+and\s+chatgpt|chatgpt\s+and\s+gemini|openai\s+and\s+gemini|gemini\s+and\s+openai)\s+(?:explain\s+|answer\s+)?",
+                "",
+                lower_stripped,
+            ).strip()
+            if not prompt_clean:
+                prompt_clean = lower_stripped
+            res = comparator.compare_providers(prompt_clean, ["gemini", "openai"])
+            return IntentResult(
+                is_windows_action=True,
+                action_type="compare_ai",
+                success=True,
+                title="Multi-AI Comparison",
+                content=res.formatted_markdown,
+            )
+
+        # ---------------- Phase 4: Explicit Named Provider Query ----------------
+        ask_match = re.match(
+            r"^ask\s+(gemini|chatgpt|openai|mock)\s+(?:to\s+)?([^\n]+)$",
+            lower_stripped,
+        )
+        if ask_match:
+            prov_target = ask_match.group(1).strip()
+            prompt_text = ask_match.group(2).strip()
+            return IntentResult(
+                is_windows_action=False,
+                action_type="query_provider",
+                success=True,
+                title=f"Query {prov_target.title()}",
+                content=prompt_text,
+                raw_data={"provider_override": prov_target, "prompt": prompt_text},
+            )
+
+        # ---------------- 6. Switch to Application / Window ----------------
         switch_match = re.match(
             r"^(switch\s+to|focus|bring\s+to\s+front|activate)\s+([^\n]+)$",
             lower_stripped,
         )
         if switch_match:
-            target = switch_match.group(2).strip().rstrip(".")
-
-            # Check if target is an AI provider switch
-            norm_target = target.lower()
-            if norm_target in ("gemini", "chatgpt", "openai", "mock", "local", "offline") or any(
-                norm_target.startswith(p) for p in ["provider to ", "default provider to ", "ai to "]
-            ):
-                from bolt.ai.provider_manager import get_provider_manager
-                clean_p = re.sub(r"^(?:default\s+)?(?:provider|ai)\s+to\s+", "", norm_target).strip()
-                pm = get_provider_manager()
-                ok, msg = pm.switch_default_provider(clean_p)
-                return IntentResult(
-                    is_windows_action=True,
-                    action_type="switch_ai_provider",
-                    success=ok,
-                    title="AI Provider Switched" if ok else "Provider Switch Failed",
-                    content=msg,
-                    raw_data={"provider": clean_p},
-                )
-
-            if target.endswith("tab") or " tab" in target:
-                clean_tab = re.sub(r"^(the\s+)?", "", target)
-                clean_tab = re.sub(r"\s+tab$", "", clean_tab).strip()
-                res = self.navigator.switch_to_tab(clean_tab)
-                return IntentResult(
-                    is_windows_action=True,
-                    action_type="switch_tab",
-                    success=res.success,
-                    title=res.title,
-                    content=res.content,
-                    raw_data=res.raw_data,
-                )
-
+            target = switch_match.group(2).strip()
             win = self.window_mgr.find_window_by_title(target)
             if win:
                 ok = self.window_mgr.switch_to_window(win.hwnd)
@@ -276,271 +448,70 @@ class WindowsIntentDispatcher:
                 content=content,
             )
 
-        # =====================================================================
-        # BROWSER AND WEBSITE INTELLIGENCE (Phase 3)
-        # =====================================================================
-
-        # ---------------- 8. Detect & List Installed Browsers ----------------
-        if lower_stripped in [
-            "what browsers are installed", "list browsers", "show browsers",
-            "installed browsers", "detect browsers", "which browsers are installed"
-        ] or (
-            "browser" in lower_stripped and any(w in lower_stripped for w in ["what", "list", "show", "installed", "detect"])
-        ):
-            browsers = self.browser_detector.detect_installed_browsers()
-            if not browsers:
-                content = "No supported web browsers detected on this system."
-            else:
-                rows = []
-                for b in browsers:
-                    def_badge = " *(System Default)*" if b.is_default else ""
-                    run_badge = f" — 🟢 Active ({len(b.running_pids)} processes)" if b.is_running else " — ⚪ Inactive"
-                    rows.append(f"- **{b.name}**{def_badge}{run_badge}\n  `{b.executable_path}`")
-                content = f"### 🌐 Installed Web Browsers ({len(browsers)} detected)\n\n" + "\n".join(rows)
-
-            return IntentResult(
-                is_windows_action=True,
-                action_type="list_browsers",
-                success=True,
-                title="Installed Browsers",
-                content=content,
-            )
-
-        # ---------------- 9. Switch to Specific Browser Tab ----------------
-        tab_switch_match = re.match(
-            r"^(switch\s+to|focus|go\s+to)\s+(?:the\s+)?([^\n]+?)\s+tab$",
-            lower_stripped,
-        )
-        if tab_switch_match:
-            target_tab = tab_switch_match.group(2).strip()
-            res = self.navigator.switch_to_tab(target_tab)
-            return IntentResult(
-                is_windows_action=True,
-                action_type="switch_tab",
-                success=res.success,
-                title=res.title,
-                content=res.content,
-                raw_data=res.raw_data,
-            )
-
-        # ---------------- 10. Read & Summarize Webpage ----------------
-        is_read_request = (
-            any(phrase in lower_stripped for phrase in [
-                "read the current webpage", "read current webpage", "read current page",
-                "summarize the current webpage", "summarize current webpage", "summarize current page",
-                "summarize this page", "summarize the page", "read the page", "read this webpage",
-                "read this page", "summarize webpage", "summarize website"
-            ])
-            or lower_stripped.startswith("read webpage ")
-            or lower_stripped.startswith("summarize ")
-        )
-        if is_read_request:
-            url_match = re.search(r"https?://[^\s]+", clean)
-            target_url = url_match.group(0) if url_match else ""
-            res = self.navigator.read_and_summarize_page(target_url)
-            return IntentResult(
-                is_windows_action=True,
-                action_type="read_webpage",
-                success=res.success,
-                title=res.title,
-                content=res.content,
-                raw_data=res.raw_data,
-            )
-
-        # ---------------- 11. Search with Provider (YouTube, Google, Bing) ----------------
-        provider_search_match = re.match(
-            r"^(?:open\s+|go\s+to\s+)?(youtube|google|bing)\s+(?:and\s+)?search(?:\s+for)?\s+(.+)$",
-            lower_stripped,
-        )
-        if provider_search_match:
-            provider = provider_search_match.group(1).strip()
-            query = provider_search_match.group(2).strip()
-            res = self.navigator.execute_search(query=query, provider=provider, open_in_browser=True)
-            return IntentResult(
-                is_windows_action=True,
-                action_type="search_web",
-                success=res.success,
-                title=res.title,
-                content=res.content,
-                raw_data=res.raw_data,
-            )
-
-        # ---------------- 12. General Web Search ----------------
-        search_web_match = re.match(
-            r"^(search\s+for|search\s+the\s+web\s+for|search\s+web\s+for|search\s+online\s+for|find\s+a\s+website\s+for)\s+(.+)$",
-            lower_stripped,
-        )
-        if search_web_match:
-            query = search_web_match.group(2).strip()
-            if not any(query.endswith(ext) for ext in [".txt", ".pdf", ".py", ".doc", ".docx", ".png"]):
-                res = self.navigator.execute_search(query=query, provider="bing", open_in_browser=False)
-                return IntentResult(
-                    is_windows_action=True,
-                    action_type="search_web",
-                    success=res.success,
-                    title=res.title,
-                    content=res.content,
-                    raw_data=res.raw_data,
-                )
-
-        # ---------------- 13. Multi-Website / Multi-Tab Navigation ----------------
-        multi_tab_match = re.match(
-            r"^(?:open|visit|launch)\s+([^\n]+?)\s+and\s+([^\n]+?)(?:\s+in\s+separate\s+tabs)?$",
-            lower_stripped,
-        )
-        if multi_tab_match:
-            cand1 = multi_tab_match.group(1).strip()
-            cand2 = multi_tab_match.group(2).strip()
-            is_cand1_site = bool(self.website_registry.find_website(cand1) or self.website_registry.validate_url(cand1))
-            is_cand2_site = bool(self.website_registry.find_website(cand2) or self.website_registry.validate_url(cand2))
-            if is_cand1_site or is_cand2_site:
-                res = self.navigator.navigate_multi_tabs([cand1, cand2])
-                return IntentResult(
-                    is_windows_action=True,
-                    action_type="multi_tab_navigation",
-                    success=res.success,
-                    title=res.title,
-                    content=res.content,
-                    raw_data=res.raw_data,
-                )
-
-        # ---------------- 14. Single Website or URL Navigation ----------------
-        site_nav_match = re.match(
-            r"^(open|visit|go\s+to|navigate\s+to)\s+(?:this\s+url:\s*|url:\s*|website\s+)?([^\n]+)$",
-            lower_stripped,
-        )
-        if site_nav_match:
-            candidate = site_nav_match.group(2).strip().rstrip(".")
-            # Strip trailing browser phrases (e.g. "Open ChatGPT in my browser")
-            candidate = re.sub(
-                r"\s+in\s+(?:my\s+|the\s+)?(?:browser|edge|chrome|firefox|brave).*$",
-                "",
-                candidate,
-                flags=re.IGNORECASE,
-            ).strip()
-
-            # Check if candidate is known website in Website Registry
-            known_site = self.website_registry.find_website(candidate)
-            if known_site:
-                res = self.navigator.navigate_single(known_site.name)
-                return IntentResult(
-                    is_windows_action=True,
-                    action_type="open_website",
-                    success=res.success,
-                    title=res.title,
-                    content=res.content,
-                    raw_data=res.raw_data,
-                )
-
-            # Check if candidate is a URL
-            if candidate.startswith("http://") or candidate.startswith("https://") or (
-                "." in candidate and not candidate.endswith((".exe", ".lnk", ".bat", ".py", ".txt"))
-            ):
-                res = self.navigator.navigate_single(candidate)
-                return IntentResult(
-                    is_windows_action=True,
-                    action_type="open_url",
-                    success=res.success,
-                    title=res.title,
-                    content=res.content,
-                    raw_data=res.raw_data,
-                )
-
-        # =====================================================================
-        # AI APPLICATION INTEGRATION (Phase 4)
-        # =====================================================================
-
-        # ---------------- 15. Switch Default AI Provider ----------------
-        switch_provider_match = re.match(
-            r"^(?:switch\s+(?:to\s+|provider\s+to\s+|default\s+provider\s+to\s+)|use\s+([a-zA-Z0-9_\-\s]+?)\s+as\s+default\s*(?:provider|ai)?$)",
-            lower_stripped,
-        )
-        if switch_provider_match:
-            from bolt.ai.provider_manager import get_provider_manager
-            target_p = switch_provider_match.group(1) if switch_provider_match.group(1) else lower_stripped.replace("switch to", "").replace("switch provider to", "").replace("switch default provider to", "").strip()
-            pm = get_provider_manager()
-            ok, msg = pm.switch_default_provider(target_p)
-            return IntentResult(
-                is_windows_action=True,
-                action_type="switch_ai_provider",
-                success=ok,
-                title="AI Provider Switched" if ok else "Provider Switch Failed",
-                content=msg,
-                raw_data={"provider": target_p},
-            )
-
-        # ---------------- 16. Multi-AI Comparison ----------------
-        is_compare_query = (
-            lower_stripped.startswith("compare ")
-            and any(p in lower_stripped for p in ["gemini", "chatgpt", "openai", "providers", "answers", "responses"])
-        )
-        if is_compare_query:
-            from bolt.ai.multi_ai import get_multi_ai_comparator
-            comp = get_multi_ai_comparator()
-            prompt_for_ai = re.sub(
-                r"^compare\s+(?:how\s+|the\s+(?:answers|responses)\s+from\s+)?(?:gemini\s+and\s+chatgpt|chatgpt\s+and\s+gemini)\s+(?:explain|describe|answer|handle|on|for\s+)?",
-                "",
-                lower_stripped,
-            ).strip()
-            if not prompt_for_ai:
-                prompt_for_ai = clean
-            res = comp.compare_providers(prompt_for_ai, provider_names=["gemini", "openai"])
-            return IntentResult(
-                is_windows_action=True,
-                action_type="compare_ai",
-                success=(res.successful_count > 0),
-                title="Multi-AI Comparison",
-                content=res.formatted_markdown,
-                raw_data={"prompt": prompt_for_ai, "successful_count": res.successful_count},
-            )
-
-        # ---------------- 17. Explicit Provider Query ----------------
-        ask_match = re.match(
-            r"^(?:ask|tell|use)\s+(gemini|chatgpt|openai|mock)\s+(?:to\s+|for\s+|this\s+task:\s*|this\s+question:\s*)?(.+)$",
-            lower_stripped,
-        )
-        if ask_match:
-            p_target = ask_match.group(1).strip()
-            sub_query = ask_match.group(2).strip()
-            return IntentResult(
-                is_windows_action=False,
-                action_type="query_provider",
-                title=f"Query {p_target.title()}",
-                raw_data={"provider_override": p_target, "prompt": sub_query},
-            )
-
-        # ---------------- 15. Open / Launch Application ----------------
+        # ---------------- 8. Open Website or Application ----------------
         open_match = re.match(
-            r"^(open|launch|start|run)\s+(?:application\s+|app\s+)?([^\n]+)$",
+            r"^(open|visit|go\s+to|navigate\s+to|launch|start|run)\s+(?:website\s+|this\s+url\s*:\s*|url\s+|application\s+|app\s+)?([^\n]+)$",
             lower_stripped,
         )
         if open_match:
-            target = open_match.group(2).strip()
+            raw_target = open_match.group(2).strip()
+            # Clean off trailing browser context phrases like "in my browser" or "in browser"
+            target = re.sub(r"\s+in\s+(?:my\s+)?browser$", "", raw_target).strip()
 
-            # Prevent misinterpreting web URLs (handled in Phase 3) or conversational statements
-            if target.startswith("http://") or target.startswith("https://") or "website" in target:
-                return IntentResult(is_windows_action=False)
+            # A. Check if target is a Known Website or Valid Web URL
+            is_explicit_url = target.startswith("http://") or target.startswith("https://")
+            is_known_site = bool(self.browser_controller.registry.resolve_website(target))
+            is_domain = bool(self.browser_controller.registry.is_valid_url(target)) and ("." in target or is_known_site)
 
-            res = self.app_controller.open_application(target)
-            if res["success"]:
-                action_badge = "ℹ️" if res.get("already_running") else "✅"
-                content = f"{action_badge} **{res['message']}**"
-            else:
-                content = f"⚠️ {res['error']}"
+            if is_explicit_url or is_known_site or is_domain:
+                res = self.browser_controller.open_url(target)
+                if res["success"]:
+                    action_badge = "ℹ️" if res.get("action") == "reused_tab" else "🌐"
+                    auth_note = ""
+                    if res.get("requires_auth"):
+                        auth_note = (
+                            "\n\n> ⚠️ *Note: This website requires account login or authentication. "
+                            "For your security, please complete sign-in manually.*"
+                        )
+                    content = f"{action_badge} **{res['message']}**{auth_note}"
+                else:
+                    content = f"⚠️ {res['error']}"
 
-            return IntentResult(
-                is_windows_action=True,
-                action_type="open_app",
-                success=res["success"],
-                title=f"Open {target}",
-                content=content,
-            )
+                return IntentResult(
+                    is_windows_action=True,
+                    action_type="open_website",
+                    success=res["success"],
+                    title=f"Website: {res.get('display_name', target)}",
+                    content=content,
+                )
+
+            # B. Check if target is an installed desktop application
+            app_res = self.app_controller.open_application(target)
+            if app_res["success"]:
+                action_badge = "ℹ️" if app_res.get("already_running") else "✅"
+                content = f"{action_badge} **{app_res['message']}**"
+                return IntentResult(
+                    is_windows_action=True,
+                    action_type="open_app",
+                    success=True,
+                    title=f"Open {target}",
+                    content=content,
+                )
+
+            # If neither website nor app, check if explicit app launch was asked
+            if "app" in lower_stripped or "application" in lower_stripped:
+                return IntentResult(
+                    is_windows_action=True,
+                    action_type="open_app",
+                    success=False,
+                    title=f"Application Not Found",
+                    content=f"⚠️ {app_res['error']}",
+                )
 
         # ---------------- 9. Minimize / Maximize Active Window ----------------
         if "minimize" in lower_stripped and ("window" in lower_stripped or "all" in lower_stripped):
             windows = self.window_mgr.get_visible_windows()
             if windows:
-                # Minimize first non-BOLT window
                 for w in windows:
                     if "bolt" not in w.title.lower():
                         self.window_mgr.minimize_window(w.hwnd)
@@ -552,7 +523,7 @@ class WindowsIntentDispatcher:
                             content=f"🪟 Minimized window: **{w.title}**",
                         )
 
-        # Not a direct Windows operational command
+        # Not a direct operational command -> route to AI LLM
         return IntentResult(is_windows_action=False)
 
 

@@ -6,9 +6,9 @@ detects authentication state, and guides browser navigation.
 """
 
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
-from bolt.browser.browser_manager import BrowserManager, NavigationResult, get_browser_manager
+from bolt.browser.browser_controller import BrowserController, get_browser_controller
 from bolt.browser.content_reader import ContentReader, get_content_reader
 from bolt.browser.website_registry import WebsiteRegistry, get_website_registry
 from bolt.config.settings import Settings, get_settings
@@ -53,12 +53,12 @@ class AIWebInteraction:
 
     def __init__(
         self,
-        browser_mgr: Optional[BrowserManager] = None,
+        browser_ctrl: Optional[BrowserController] = None,
         registry: Optional[WebsiteRegistry] = None,
         content_reader: Optional[ContentReader] = None,
         settings: Optional[Settings] = None,
     ):
-        self.browser_mgr = browser_mgr or get_browser_manager()
+        self.browser_ctrl = browser_ctrl or get_browser_controller()
         self.registry = registry or get_website_registry()
         self.content_reader = content_reader or get_content_reader()
         self.settings = settings or get_settings()
@@ -80,20 +80,18 @@ class AIWebInteraction:
                 )
         return None
 
-    def open_ai_web_service(self, service_key: str) -> NavigationResult:
+    def open_ai_web_service(self, service_key: str) -> Dict[str, Any]:
         """Open the target AI website in the browser and verify its state."""
         clean_key = service_key.strip().lower()
         info = self.KNOWN_AI_SERVICES.get(clean_key)
         if not info:
-            return NavigationResult(
-                success=False,
-                url="",
-                browser_name="",
-                message=f"Unknown AI service '{service_key}'.",
-            )
+            return {
+                "success": False,
+                "error": f"Unknown AI service '{service_key}'.",
+            }
 
         url = info["url"]
-        nav_res = self.browser_mgr.open_url(url, new_tab=True, verify=True)
+        nav_res = self.browser_ctrl.open_url(url, new_tab=True)
         return nav_res
 
 

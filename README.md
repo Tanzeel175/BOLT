@@ -6,39 +6,40 @@
 
 ## 🎯 Current Milestone: Phase 4 – AI Application Integration (COMPLETED)
 
-### Phase 1 Features:
-- 🖥️ **PySide6 Modern Dark-Themed Desktop Interface** tailored for Windows 11.
-- ⚡ **BOLT Brand Header & Status Dashboard**: Active provider/model badges, status indicators, and clean controls.
-- 💬 **Conversation View**: Rich message cards with Markdown rendering (code blocks, syntax highlighting, bullet points, tables, blockquotes) and one-click copy.
-- ⌨️ **Input Bar**: Multi-line command input with Enter to send, Shift+Enter for newlines, and a Phase 7 voice microphone placeholder.
-- 🧠 **Configurable AI Providers**: Google Gemini, OpenAI-compatible, and Local Mock.
-- 🔒 **Secure Credential Storage**: API keys stored in `.env` and masked in settings.
+### Complete Implemented Capabilities:
+
+#### 1. Foundation & Desktop Interface (Phase 1)
+- 🖥️ **PySide6 Dark-Themed Desktop Interface** tailored for Windows 11.
+- ⚡ **BOLT Brand Header & Status Dashboard**: Active provider/model badges, status indicators, and controls.
+- 💬 **Conversation View**: Rich message cards with Markdown rendering, code highlighting, and one-click copy.
+- ⌨️ **Input Bar**: Multi-line command input with Enter to send, Shift+Enter for newlines.
 - 🗄️ **Persistent SQLite History**: Multi-session conversations, automatic title generation, and message history in WAL mode.
-- 📊 **Task Status Area**: Real-time worker state ("Ready", "Thinking...", "Completed"), model telemetry, and Windows system specs.
-- 📜 **Enterprise Logging**: Rotating file logging (`logs/bolt.log`) and console output.
+- 📊 **Task Status Area**: Real-time worker state, model telemetry, and Windows system specs.
+- 📜 **Enterprise Logging**: Rotating file logging (`logs/bolt.log`) and safe Unicode console output.
 
-### Phase 2 Features (Windows & Application Control):
-- 🔍 **Deep Application Discovery**: Indexed 120+ applications across Start Menu, Registry, and System paths.
-- 🪟 **C-Types Window Management**: Seamless window enumeration, switching, minimize/maximize, and safe closing.
-- 🛡️ **Protected Process Defense**: Immune protection for critical Windows OS processes (`explorer`, `dwm`, `svchost`).
-- 📊 **Real-Time Hardware Telemetry**: Live CPU, RAM, Disk, and Battery diagnostics.
+#### 2. Computer Understanding & Windows Control (Phase 2)
+- 🔍 **Application Discovery Engine**: Automatic detection across Start Menu shortcuts, Windows App Paths, Registry, and standard directories.
+- 🗃️ **Persistent SQLite Application Registry**: Tracks paths, launch methods, aliases, launch verification, and success history.
+- 🚀 **Application Lifecycle Controller**: Safe launching, duplicate window prevention, and verified termination.
+- 🪟 **Window Management**: Enumerates visible top-level windows, window switching/focusing (`user32.SetForegroundWindow`), minimizing, and maximizing.
+- 📁 **File & Folder Operations**: Folder aliasing (`desktop`, `downloads`, `documents`, `pictures`) and multi-directory file search.
+- 🛡️ **Protected Process Security**: Guardrails preventing termination of critical Windows system processes (`explorer.exe`, `csrss.exe`, `winlogon.exe`, `python.exe`).
 
-### Phase 3 Features (Browser & Website Intelligence):
-- 🌐 **Browser Detection & Management**: Automatic detection of Chrome, Edge, Firefox, and Brave with default browser resolution.
-- 🔄 **Session Reuse**: Dispatches URLs to active browser processes without spawning duplicate instances or profile locks.
-- 🗃️ **Persistent Website Registry**: SQLite-backed knowledge base with URL validation and seed sites (ChatGPT, Gemini, Gmail, YouTube, Google Drive).
-- 🔍 **Live Search Engine**: Bing web search integration with clean URL resolution and provider search shortcuts (Google, YouTube).
-- 📄 **Webpage Content Understanding**: Heading extraction (`H1`-`H3`), executive summarization, and notable links analysis.
-- 🔒 **Security-First Auth Detection**: Automatically detects login pages and prompts for manual authentication without capturing credentials.
-- 🛠️ **Structured Tool Registry**: LLM tool calling schema preventing arbitrary script execution.
+#### 3. Browser & Website Intelligence (Phase 3)
+- 🌐 **Browser Detection**: Detects Microsoft Edge, Google Chrome, Brave, Firefox, and reads the default Windows browser.
+- 📑 **Playwright Browser Navigation**: Automated browser control using installed browser channels.
+- 🔄 **Smart Tab Management & Reuse**: Automatically reuses existing open tabs to avoid duplicate browser windows.
+- 🗄️ **Website Registry**: Seeded with ChatGPT, Gemini, Gmail, Google, Google Drive, and YouTube; supports dynamic URL validation and aliasing.
+- 🔍 **Search Engine & Content Reader**: Web search across Google, YouTube, DuckDuckGo, and GitHub; reads accessible page content, headings, and outlines.
+- 🔐 **Authentication Wall Detection**: Detects login forms and credentials walls, advising users to sign in manually for safety.
 
-### Phase 4 Features (AI Application Integration):
-- 🤖 **Modular AI Architecture**: Standardized provider interface supporting official Google Gemini and OpenAI ChatGPT APIs.
-- 🔄 **Runtime Provider Switching**: Switch between Gemini, OpenAI, and Local mode on the fly without restarting BOLT.
-- ⚖️ **Multi-AI Comparison**: Concurrently queries multiple AI services (e.g., Gemini and ChatGPT) with identical prompts and synthesizes consensus and stylistic differences.
-- 🛡️ **Zero-Faking Error Handling**: Provides actionable troubleshooting cards when credentials are missing or invalid, never feigning fake responses.
-- 📋 **AI Workflow Artifacts**: Prepares structured drafts (e.g. professional emails, error diagnoses) for future automated workflow pipelines.
-- 🌐 **Dual Integration Modes**: Method A (programmatic API queries) vs Method B (automated browser interaction via Phase 3 Browser Manager).
+#### 4. AI Application Integration (Phase 4)
+- 🧠 **Modular AI Provider Architecture**: Standardized abstraction supporting Google Gemini, OpenAI ChatGPT, and offline Mock/Local fallback.
+- 🔄 **Runtime Provider Switching**: Swap default providers without restarting BOLT (`"Switch to Gemini"`, `"Switch to ChatGPT"`).
+- ⚖️ **Multi-AI Comparison Engine**: Parallel queries to multiple providers with side-by-side comparative Markdown reporting (`"Compare how Gemini and ChatGPT explain recursion"`).
+- 🎯 **Explicit Provider Query Routing**: Directs single requests to specified models (`"Ask Gemini to..."`).
+- 🔀 **Dual-Method AI Integration**: Seamlessly switches between programmatic API (Method A) and browser-based web navigation (Method B: `"Open ChatGPT in my browser"`).
+- 🔒 **Zero-Faking Security Policy**: When API keys are missing, provides actionable setup instructions instead of fabricated responses; masks keys in settings and logs.
 
 ---
 
@@ -46,34 +47,32 @@
 
 ```
 BOLT/
-├── .env                  # Secure environment credentials & configuration
+├── .env                  # Secure environment credentials (ignored from git)
 ├── .env.example          # Environment variables template
 ├── requirements.txt      # Python dependencies
 ├── pyproject.toml        # Project metadata
 ├── README.md             # Project documentation
+├── DEVELOPMENT_PROGRESS.md # Phase-by-phase development tracker
 ├── run.py                # Main application entry point
 ├── data/
-│   └── bolt.db           # SQLite database (conversations, messages, tasks)
+│   └── bolt.db           # SQLite database (conversations, registry, preferences)
 ├── logs/
 │   └── bolt.log          # Application log file (rotating)
+├── tests/
+│   ├── test_e2e_interaction.py       # Phase 1 UI E2E test
+│   ├── test_phase2.py                # Phase 2 Windows control tests
+│   ├── test_phase3.py                # Phase 3 browser tests
+│   ├── test_phase3_ui_interaction.py # Phase 3 UI E2E test
+│   ├── test_phase4.py                # Phase 4 AI integration tests
+│   └── test_phase4_ui_interaction.py # Phase 4 UI E2E test
 └── bolt/
-    ├── __init__.py
     ├── config/           # Application constants & settings management
-    │   ├── constants.py
-    │   └── settings.py
-    ├── core/             # Persistence and logging engine
-    │   ├── database.py
-    │   └── logger.py
-    ├── ai/               # AI providers (Gemini, OpenAI, Mock) & router
-    │   ├── base.py
-    │   ├── gemini_provider.py
-    │   ├── openai_provider.py
-    │   ├── mock_provider.py
-    │   └── router.py
-    ├── windows/          # Phase 2 Windows automation, discovery & dispatch
-    ├── browser/          # Phase 3 Browser detection, registry, search & content reader
-    ├── tasks/            # Tool registry & execution engine
-    └── ui/               # PySide6 desktop interface
+    ├── core/             # SQLite persistence, telemetry, and logger
+    ├── ai/               # Multi-provider AI system, comparator, router
+    ├── browser/          # Browser detector, Playwright controller, registry, reader
+    ├── windows/          # App discovery, lifecycle, window & file managers, intent dispatcher
+    ├── ui/               # PySide6 desktop interface and components
+    └── tasks/            # Tool registry and task planning scaffolding
 ```
 
 ---
@@ -83,6 +82,7 @@ BOLT/
 ### 1. Requirements
 - Windows 11 64-bit
 - Python 3.10+ (tested on Python 3.13)
+- Playwright browsers: `playwright install msedge` / `playwright install chromium`
 
 ### 2. Launching BOLT
 Run with the virtual environment Python:
@@ -90,19 +90,30 @@ Run with the virtual environment Python:
 .\.venv\Scripts\python.exe run.py
 ```
 
-### 3. Configuring your AI API Key
-1. Click **⚙ Settings** in the top-right of the BOLT window.
-2. Select **Google Gemini** or **OpenAI**.
-3. Enter your API key (get a free Gemini key at [Google AI Studio](https://aistudio.google.com/)).
-4. Click **🔌 Test Connection** and then **💾 Save Configuration**.
+### 3. Running Automated Tests
+```powershell
+# Phase 1
+.\.venv\Scripts\python.exe -u tests/test_e2e_interaction.py
+
+# Phase 2
+.\.venv\Scripts\python.exe -u tests/test_phase2.py
+
+# Phase 3
+.\.venv\Scripts\python.exe -u tests/test_phase3.py
+.\.venv\Scripts\python.exe -u tests/test_phase3_ui_interaction.py
+
+# Phase 4
+.\.venv\Scripts\python.exe -u tests/test_phase4.py
+.\.venv\Scripts\python.exe -u tests/test_phase4_ui_interaction.py
+```
 
 ---
 
 ## 🗺️ 10-Phase Roadmap
 - [x] **Phase 1:** BOLT Foundation and Desktop Interface
-- [ ] **Phase 2:** Computer Understanding and Application Control
-- [ ] **Phase 3:** Browser and Website Intelligence
-- [ ] **Phase 4:** AI Application Integration
+- [x] **Phase 2:** Computer Understanding and Application Control
+- [x] **Phase 3:** Browser and Website Intelligence
+- [x] **Phase 4:** AI Application Integration
 - [ ] **Phase 5:** Intelligent Task Planning and Multitasking
 - [ ] **Phase 6:** Visual Computer Use
 - [ ] **Phase 7:** Voice Assistant

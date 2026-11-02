@@ -53,9 +53,10 @@ def test_phase4_ui_e2e():
     print("\nSimulating User Input 3: 'Ask Gemini to write a professional email requesting an internship'")
     window._handle_user_message("Ask Gemini to write a professional email requesting an internship")
 
-    # Wait for background thread to complete
+    # Wait for background thread to complete and pump events
     if window.active_worker and window.active_worker.isRunning():
         window.active_worker.wait(5000)
+    app.processEvents()
 
     msgs3 = db.get_messages(conv_id)
     latest_ask = msgs3[-1]
@@ -82,4 +83,3 @@ def self_assert(condition: bool, message: str = ""):
 
 if __name__ == "__main__":
     test_phase4_ui_e2e()
-

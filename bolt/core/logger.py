@@ -25,6 +25,17 @@ def setup_logger(log_level: str = "INFO") -> logging.Logger:
         # Avoid duplicate handlers if called multiple times
         logger.handlers.clear()
 
+        if hasattr(sys.stdout, "reconfigure"):
+            try:
+                sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+        if hasattr(sys.stderr, "reconfigure"):
+            try:
+                sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
         formatter = logging.Formatter(
             fmt="[%(asctime)s] [%(levelname)-7s] [%(name)s:%(module)s] %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
@@ -60,4 +71,3 @@ def get_logger(module_name: Optional[str] = None) -> logging.Logger:
     if module_name:
         return logging.getLogger(f"BOLT.{module_name}")
     return logging.getLogger("BOLT")
-

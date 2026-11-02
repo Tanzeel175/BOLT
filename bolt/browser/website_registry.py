@@ -1,11 +1,9 @@
 """
-Website Registry and Knowledge System for BOLT (Phase 3).
-Manages persistent knowledge of known websites, URLs, categories,
-authentication requirements, and navigation procedures using SQLite.
+Website Registry and Knowledge subsystem for BOLT.
+Maintains persistent website knowledge, aliases, URL normalization, validation, and access history.
 """
 
 import re
-from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
@@ -14,124 +12,96 @@ from bolt.core.logger import get_logger
 
 logger = get_logger("WebsiteRegistry")
 
-
-@dataclass
-class WebsiteEntry:
-    id: str
-    name: str
-    url: str
-    category: str = "General"
-    description: str = ""
-    preferred_browser: str = ""
-    last_successful_access: Optional[str] = None
-    access_count: int = 0
-    auth_status: str = "none"  # "none", "login_required", "login_supported"
-    navigation_procedure: str = "direct_url"
-    is_verified: bool = True
-    created_at: str = ""
-    updated_at: str = ""
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "id": self.id,
-            "name": self.name,
-            "url": self.url,
-            "category": self.category,
-            "description": self.description,
-            "preferred_browser": self.preferred_browser,
-            "last_successful_access": self.last_successful_access,
-            "access_count": self.access_count,
-            "auth_status": self.auth_status,
-            "navigation_procedure": self.navigation_procedure,
-            "is_verified": self.is_verified,
-        }
+# Common aliases and natural phrasing mapped to website names
+COMMON_WEBSITE_ALIASES: Dict[str, str] = {
+    "chatgpt": "chatgpt",
+    "chat gpt": "chatgpt",
+    "gpt": "chatgpt",
+    "openai": "chatgpt",
+    "gemini": "gemini",
+    "google gemini": "gemini",
+    "bard": "gemini",
+    "gmail": "gmail",
+    "mail": "gmail",
+    "google mail": "gmail",
+    "google": "google",
+    "google search": "google",
+    "search": "google",
+    "google drive": "google drive",
+    "drive": "google drive",
+    "gdrive": "google drive",
+    "youtube": "youtube",
+    "yt": "youtube",
+    "github": "github",
+    "gh": "github",
+}
 
 
 class WebsiteRegistry:
-    """Persistent Website Knowledge Registry for BOLT."""
-
-    # Common aliases mapping user spoken names to canonical website registry keys
-    WEBSITE_ALIASES: Dict[str, str] = {
-        "gpt": "chatgpt",
-        "chat gpt": "chatgpt",
-        "openai": "chatgpt",
-        "openai chatgpt": "chatgpt",
-        "google gemini": "gemini",
-        "bard": "gemini",
-        "google mail": "gmail",
-        "mail": "gmail",
-        "email": "gmail",
-        "inbox": "gmail",
-        "google search": "google",
-        "search": "google",
-        "drive": "google drive",
-        "gdrive": "google drive",
-        "yt": "youtube",
-        "you tube": "youtube",
-    }
+    """Manages verified website knowledge, aliases, and SQLite persistence."""
 
     def __init__(self, db: Optional[Database] = None):
         self.db = db or get_database()
 
     @staticmethod
-    def validate_url(url_candidate: str) -> Optional[str]:
+    def is_valid_url(url: str) -> bool:
         """
-        Validate and normalize a URL.
-        Returns normalized https URL if valid, or None if invalid/untrusted.
+        Validate URL format and protocol.
+        Rejects empty, non-http/https, and dangerous schemes (javascript:, file:, data:).
         """
-        raw = url_candidate.strip()
-        if not raw:
-            return None
+        if not url or not isinstance(url, str):
+            return False
 
-        # Add https scheme if omitted
-        if not re.match(r"^https?://", raw, re.IGNORECASE):
-            raw = "https://" + raw
+        url_clean = url.strip()
+        # Security: block dangerous protocols
+        lower = url_clean.lower()
+        if any(lower.startswith(bad) for bad in ["javascript:", "file:", "data:", "vbscript:"]):
+            return False
 
         try:
-            parsed = urlparse(raw)
-            if not parsed.scheme or parsed.scheme.lower() not in ["http", "https"]:
-                return None
-            if not parsed.netloc or "." not in parsed.netloc:
-                return None
-            # Reject dangerous/invalid schemes or malformed hosts
-            if any(char in parsed.netloc for char in [" ", "<", ">", '"', "'", "\\"]):
-                return None
-            return raw
+            parsed = urlparse(url_clean)
+            # Accept if scheme is http/https and has valid netloc
+            if parsed.scheme in ["http", "https"] and bool(parsed.netloc):
+                return True
+            # Also accept domain format like "example.com" or "www.example.com"
+            domain_pattern = r"^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)+.*$"
+            if re.match(domain_pattern, url_clean):
+                return True
+            return False
         except Exception:
-            return None
+            return False
 
-    def find_website(self, query: str) -> Optional[WebsiteEntry]:
+    @staticmethod
+    def normalize_url(url: str) -> str:
+        """Ensure URL has a proper http or https scheme and clean formatting."""
+        clean = url.strip()
+        if not (clean.startswith("http://") or clean.startswith("https://")):
+            clean = f"https://{clean}"
+        return clean
+
+    def resolve_website(self, query: str) -> Optional[Dict[str, Any]]:
         """
-        Look up a website by name, alias, URL, or domain.
-        Example: "chatgpt" -> ChatGPT, "mail" -> Gmail, "https://youtube.com" -> YouTube.
+        Resolve website by natural query using alias lookup, exact name match, or fuzzy search.
+        Returns website record dictionary if found, otherwise None.
         """
-        clean = query.strip().lower()
-        if not clean:
-            return None
+        clean_query = query.strip().lower()
 
-        # 1. Check exact aliases
-        canonical_name = self.WEBSITE_ALIASES.get(clean, clean)
+        # 1. Alias lookup
+        target_name = COMMON_WEBSITE_ALIASES.get(clean_query, clean_query)
 
-        # 2. Lookup in SQLite by name
-        record = self.db.get_website_by_name(canonical_name)
-        if record:
-            return WebsiteEntry(**record)
+        # 2. Exact match in SQLite
+        site = self.db.get_website_by_name(target_name)
+        if site:
+            return site
 
-        # 3. Check if query is a URL
-        if re.match(r"^https?://", clean) or "." in clean:
-            valid_url = self.validate_url(clean)
-            if valid_url:
-                record = self.db.get_website_by_url(valid_url)
-                if record:
-                    return WebsiteEntry(**record)
-
-                # Try matching by hostname / domain
-                parsed = urlparse(valid_url)
-                domain = parsed.netloc.lower().replace("www.", "")
-                for site_dict in self.db.get_all_websites():
-                    site_domain = urlparse(site_dict["url"]).netloc.lower().replace("www.", "")
-                    if domain == site_domain or domain in site_domain:
-                        return WebsiteEntry(**site_dict)
+        # 3. Fuzzy search in SQLite
+        candidates = self.db.search_websites(target_name)
+        if candidates:
+            # Prefer match where name or display_name starts with query
+            for c in candidates:
+                if c["name"].startswith(target_name) or c["display_name"].lower().startswith(target_name):
+                    return c
+            return candidates[0]
 
         return None
 
@@ -139,54 +109,68 @@ class WebsiteRegistry:
         self,
         name: str,
         url: str,
+        display_name: Optional[str] = None,
         category: str = "General",
         description: str = "",
         preferred_browser: str = "",
         auth_status: str = "none",
-        is_verified: bool = True,
-    ) -> Optional[WebsiteEntry]:
+        navigation_procedure: str = "",
+    ) -> Dict[str, Any]:
         """
-        Register a new website or update an existing one after validation.
-        Rejects invalid or malformed URLs.
+        Validate and register a new website into persistent memory.
+        Refuses invalid or unsafe URLs.
         """
-        valid_url = self.validate_url(url)
-        if not valid_url:
-            logger.warning(f"Rejected invalid URL for registration: '{url}'")
-            return None
+        if not self.is_valid_url(url):
+            return {
+                "success": False,
+                "error": f"Invalid or unsafe URL format: '{url}'. Only HTTP/HTTPS URLs are allowed.",
+            }
 
-        clean_name = name.strip().lower()
-        if not clean_name:
-            # Derive name from domain if name not specified
-            parsed = urlparse(valid_url)
-            clean_name = parsed.netloc.lower().replace("www.", "").split(".")[0]
+        norm_url = self.normalize_url(url)
+        name_clean = name.strip().lower()
+        disp_name = display_name or name.title()
 
-        record = self.db.upsert_website(
-            name=clean_name,
-            url=valid_url,
+        site_id = self.db.upsert_website(
+            name=name_clean,
+            display_name=disp_name,
+            url=norm_url,
             category=category,
             description=description,
             preferred_browser=preferred_browser,
             auth_status=auth_status,
-            is_verified=is_verified,
+            navigation_procedure=navigation_procedure,
+            is_verified=1,
         )
-        logger.info(f"Registered website '{clean_name}' -> {valid_url}")
-        return WebsiteEntry(**record)
 
-    def record_access_success(self, site_name_or_id: str) -> None:
-        """Update last access timestamp and increment counter for a website."""
-        self.db.record_website_access_success(site_name_or_id)
+        logger.info(f"Registered website '{disp_name}' ({norm_url}) in category '{category}'")
+        return {
+            "success": True,
+            "id": site_id,
+            "name": name_clean,
+            "display_name": disp_name,
+            "url": norm_url,
+            "category": category,
+        }
 
-    def get_all_registered_websites(self) -> List[WebsiteEntry]:
-        """Fetch all registered websites."""
-        rows = self.db.get_all_websites()
-        return [WebsiteEntry(**row) for row in rows]
+    def list_websites(self, category: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List registered websites, optionally filtered by category."""
+        all_sites = self.db.get_all_websites()
+        if category:
+            return [s for s in all_sites if s.get("category", "").lower() == category.lower()]
+        return all_sites
+
+    def record_access_success(self, name_or_id: str) -> None:
+        """Record successful website navigation."""
+        self.db.record_website_access_success(name_or_id)
 
 
-_WEBSITE_REGISTRY: Optional[WebsiteRegistry] = None
+_REGISTRY_INSTANCE: Optional[WebsiteRegistry] = None
 
 
 def get_website_registry() -> WebsiteRegistry:
-    global _WEBSITE_REGISTRY
-    if _WEBSITE_REGISTRY is None:
-        _WEBSITE_REGISTRY = WebsiteRegistry()
-    return _WEBSITE_REGISTRY
+    """Singleton getter for WebsiteRegistry."""
+    global _REGISTRY_INSTANCE
+    if _REGISTRY_INSTANCE is None:
+        _REGISTRY_INSTANCE = WebsiteRegistry()
+    return _REGISTRY_INSTANCE
+

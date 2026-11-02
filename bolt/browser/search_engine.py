@@ -1,169 +1,142 @@
 """
-Internet Search Engine for BOLT (Phase 3).
-Executes live online searches, extracts structured titles, URLs, and summaries,
-formats search results for chat rendering, and launches search queries in browsers.
+Internet Search Engine subsystem for BOLT.
+Retrieves web search results, extracts titles, URLs, and summaries, and generates search navigation URLs.
 """
 
-import base64
-import re
 import urllib.parse
-from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import requests
-from bs4 import BeautifulSoup
 
 from bolt.core.logger import get_logger
 
 logger = get_logger("SearchEngine")
 
-
-@dataclass
-class SearchResultItem:
-    title: str
-    url: str
-    snippet: str
-
-    def to_dict(self) -> Dict[str, str]:
-        return {
-            "title": self.title,
-            "url": self.url,
-            "snippet": self.snippet,
-        }
-
-
-@dataclass
-class SearchResponse:
-    query: str
-    provider: str
-    total_results: int
-    items: List[SearchResultItem]
-    markdown_content: str
-    search_url: str
+SEARCH_PROVIDERS = {
+    "google": "https://www.google.com/search?q={query}",
+    "youtube": "https://www.youtube.com/results?search_query={query}",
+    "duckduckgo": "https://duckduckgo.com/?q={query}",
+    "bing": "https://www.bing.com/search?q={query}",
+    "github": "https://github.com/search?q={query}",
+}
 
 
 class SearchEngine:
-    """Live web search provider for BOLT."""
+    """Provides search query resolution, online result extraction, and direct search URL synthesis."""
 
-    HEADERS = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        ),
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    }
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        })
 
     @staticmethod
-    def clean_bing_redirect(raw_url: str) -> str:
-        """Decode Bing's redirect link parameter u=a1<base64> to obtain direct website URL."""
-        if "bing.com/ck/a?" in raw_url and "u=" in raw_url:
-            try:
-                parsed = urllib.parse.urlparse(raw_url)
-                qs = urllib.parse.parse_qs(parsed.query)
-                u_param = qs.get("u", [""])[0]
-                if u_param.startswith("a1"):
-                    base64_str = u_param[2:]
-                    # Fix padding if necessary
-                    rem = len(base64_str) % 4
-                    if rem:
-                        base64_str += "=" * (4 - rem)
-                    decoded = base64.b64decode(base64_str).decode("utf-8", errors="ignore")
-                    if decoded.startswith("http"):
-                        return decoded
-            except Exception:
-                pass
-        return raw_url
+    def build_search_url(query: str, provider: str = "google") -> str:
+        """Construct direct search URL for a specified engine."""
+        prov_key = provider.lower().strip()
+        template = SEARCH_PROVIDERS.get(prov_key, SEARCH_PROVIDERS["google"])
+        encoded = urllib.parse.quote_plus(query.strip())
+        return template.format(query=encoded)
 
-    def search_web(self, query: str, max_results: int = 5) -> SearchResponse:
+    def search_online(self, query: str, max_results: int = 5) -> List[Dict[str, str]]:
         """
-        Execute live web search for a query and return structured search items.
-        Extracts verified titles, URLs, and contextual snippets.
+        Execute an online search query.
+        Uses DuckDuckGo Instant Topic / Related Topic API + structured fallback.
+        Returns list of {title, url, snippet}.
         """
+        logger.info(f"Executing web search for: '{query}'")
         clean_query = query.strip()
-        encoded_query = urllib.parse.quote_plus(clean_query)
-        search_url = f"https://www.bing.com/search?q={encoded_query}"
+        results: List[Dict[str, str]] = []
 
-        items: List[SearchResultItem] = []
-        logger.info(f"Executing web search for: '{clean_query}'")
-
+        # 1. Query DuckDuckGo Instant Answer API
         try:
-            resp = requests.get(search_url, headers=self.HEADERS, timeout=12.0)
+            api_url = f"https://api.duckduckgo.com/?q={urllib.parse.quote_plus(clean_query)}&format=json&no_html=1&skip_disambig=0"
+            resp = self.session.get(api_url, timeout=6.0)
             if resp.status_code == 200:
-                soup = BeautifulSoup(resp.text, "html.parser")
-                for li in soup.select("li.b_algo"):
-                    if len(items) >= max_results:
+                data = resp.json()
+
+                # Primary Abstract
+                heading = data.get("Heading", "")
+                abstract = data.get("AbstractText", "")
+                abstract_url = data.get("AbstractURL", "")
+
+                if abstract and heading:
+                    results.append({
+                        "title": heading,
+                        "url": abstract_url or self.build_search_url(clean_query, "google"),
+                        "snippet": abstract,
+                    })
+
+                # Related Topics
+                for topic in data.get("RelatedTopics", []):
+                    if len(results) >= max_results:
                         break
-
-                    h2 = li.select_one("h2 a")
-                    if not h2:
-                        continue
-
-                    title = h2.get_text(strip=True)
-                    raw_href = h2.get("href", "")
-                    clean_url = self.clean_bing_redirect(raw_href)
-
-                    # Extract snippet
-                    snippet_el = li.select_one(".b_caption p") or li.select_one(".b_snippet")
-                    snippet = snippet_el.get_text(strip=True) if snippet_el else ""
-
-                    if title and clean_url and clean_url.startswith("http"):
-                        items.append(SearchResultItem(title=title, url=clean_url, snippet=snippet))
-
+                    # Sometimes topics are grouped inside 'Topics' list
+                    if "Topics" in topic:
+                        for sub_t in topic["Topics"]:
+                            if len(results) >= max_results:
+                                break
+                            if "Text" in sub_t and "FirstURL" in sub_t:
+                                results.append({
+                                    "title": sub_t.get("Text", "").split(" - ")[0],
+                                    "url": sub_t.get("FirstURL", ""),
+                                    "snippet": sub_t.get("Text", ""),
+                                })
+                    elif "Text" in topic and "FirstURL" in topic:
+                        results.append({
+                            "title": topic.get("Text", "").split(" - ")[0],
+                            "url": topic.get("FirstURL", ""),
+                            "snippet": topic.get("Text", ""),
+                        })
         except Exception as e:
-            logger.error(f"Search request failed for '{clean_query}': {e}")
+            logger.warning(f"Instant API query failed: {e}")
 
-        # Format markdown response
-        if items:
-            rows = []
-            for i, it in enumerate(items, 1):
-                snippet_text = f"\n  *{it.snippet}*" if it.snippet else ""
-                rows.append(f"{i}. **[{it.title}]({it.url})**{snippet_text}\n  `{it.url}`")
+        # 2. If results are sparse, add direct search destination links
+        if len(results) < max_results:
+            google_url = self.build_search_url(clean_query, "google")
+            results.append({
+                "title": f"Google Search: \"{clean_query}\"",
+                "url": google_url,
+                "snippet": f"View complete real-time web results for '{clean_query}' on Google Search.",
+            })
 
-            markdown = (
-                f"### 🔍 Search Results for: *\"{clean_query}\"*\n\n"
-                + "\n\n".join(rows)
-                + f"\n\n---\n*Found {len(items)} web results via Bing Search. Ask BOLT to open any result.*"
-            )
-        else:
-            markdown = (
-                f"### 🔍 Web Search for: *\"{clean_query}\"*\n\n"
-                f"I prepared a live search on your default browser:\n"
-                f"- [Open Search in Browser]({search_url})\n\n"
-                f"No instant snippets were returned from the automated endpoint."
-            )
+            youtube_url = self.build_search_url(clean_query, "youtube")
+            results.append({
+                "title": f"YouTube Video Results: \"{clean_query}\"",
+                "url": youtube_url,
+                "snippet": f"Watch video tutorials, demonstrations, and guides for '{clean_query}' on YouTube.",
+            })
 
-        return SearchResponse(
-            query=clean_query,
-            provider="Bing Search",
-            total_results=len(items),
-            items=items,
-            markdown_content=markdown,
-            search_url=search_url,
-        )
+        logger.info(f"Retrieved {len(results)} search items for '{query}'")
+        return results[:max_results]
 
-    @staticmethod
-    def get_search_url_for_provider(provider: str, query: str) -> str:
-        """Construct a search query URL for a specific provider (Google, YouTube, Bing)."""
-        clean_query = urllib.parse.quote_plus(query.strip())
-        p_lower = provider.strip().lower()
+    def format_results_markdown(self, query: str, results: List[Dict[str, str]], provider: str = "google") -> str:
+        """Format search results into clean, readable GitHub-style Markdown."""
+        search_url = self.build_search_url(query, provider)
+        lines = [
+            f"### 🔍 Web Search Results: *\"{query}\"*\n",
+            f"Direct Search Link: [{provider.title()} Search]({search_url})\n",
+        ]
 
-        if "youtube" in p_lower:
-            return f"https://www.youtube.com/results?search_query={clean_query}"
-        elif "google" in p_lower:
-            return f"https://www.google.com/search?q={clean_query}"
-        elif "duck" in p_lower:
-            return f"https://duckduckgo.com/?q={clean_query}"
-        else:
-            return f"https://www.bing.com/search?q={clean_query}"
+        for i, item in enumerate(results, 1):
+            title = item.get("title", f"Result #{i}")
+            url = item.get("url", "#")
+            snippet = item.get("snippet", "")
+            lines.append(f"**{i}. [{title}]({url})**")
+            if snippet:
+                lines.append(f"> {snippet}\n")
+            else:
+                lines.append(f"> `{url}`\n")
+
+        return "\n".join(lines)
 
 
-_SEARCH_ENGINE: Optional[SearchEngine] = None
+_SEARCH_ENGINE_INSTANCE: Optional[SearchEngine] = None
 
 
 def get_search_engine() -> SearchEngine:
-    global _SEARCH_ENGINE
-    if _SEARCH_ENGINE is None:
-        _SEARCH_ENGINE = SearchEngine()
-    return _SEARCH_ENGINE
+    """Singleton getter for SearchEngine."""
+    global _SEARCH_ENGINE_INSTANCE
+    if _SEARCH_ENGINE_INSTANCE is None:
+        _SEARCH_ENGINE_INSTANCE = SearchEngine()
+    return _SEARCH_ENGINE_INSTANCE
 
