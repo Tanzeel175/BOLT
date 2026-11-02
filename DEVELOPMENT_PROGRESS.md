@@ -83,3 +83,4 @@ All 8 testing criteria from Section 6 verified:
 - Detecting running processes and switching between active windows.
 - Exploring file systems and opening files/folders.
 - Procedure memory for application execution.
+
