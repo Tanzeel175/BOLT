@@ -4,21 +4,41 @@
 
 ---
 
-## 🎯 Current Milestone: Phase 1 – Foundation & Desktop Interface
+## 🎯 Current Milestone: Phase 4 – AI Application Integration (COMPLETED)
 
 ### Phase 1 Features:
 - 🖥️ **PySide6 Modern Dark-Themed Desktop Interface** tailored for Windows 11.
 - ⚡ **BOLT Brand Header & Status Dashboard**: Active provider/model badges, status indicators, and clean controls.
 - 💬 **Conversation View**: Rich message cards with Markdown rendering (code blocks, syntax highlighting, bullet points, tables, blockquotes) and one-click copy.
 - ⌨️ **Input Bar**: Multi-line command input with Enter to send, Shift+Enter for newlines, and a Phase 7 voice microphone placeholder.
-- 🧠 **Configurable AI Providers**:
-  - **Google Gemini** (`gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-1.5-flash`, etc.)
-  - **OpenAI / OpenAI-Compatible** (GPT-4o, GPT-4o-mini, Groq, OpenRouter, Ollama)
-  - **Built-in Local/Diagnostic Engine** for offline testing and hardware diagnostics.
+- 🧠 **Configurable AI Providers**: Google Gemini, OpenAI-compatible, and Local Mock.
 - 🔒 **Secure Credential Storage**: API keys stored in `.env` and masked in settings.
 - 🗄️ **Persistent SQLite History**: Multi-session conversations, automatic title generation, and message history in WAL mode.
 - 📊 **Task Status Area**: Real-time worker state ("Ready", "Thinking...", "Completed"), model telemetry, and Windows system specs.
 - 📜 **Enterprise Logging**: Rotating file logging (`logs/bolt.log`) and console output.
+
+### Phase 2 Features (Windows & Application Control):
+- 🔍 **Deep Application Discovery**: Indexed 120+ applications across Start Menu, Registry, and System paths.
+- 🪟 **C-Types Window Management**: Seamless window enumeration, switching, minimize/maximize, and safe closing.
+- 🛡️ **Protected Process Defense**: Immune protection for critical Windows OS processes (`explorer`, `dwm`, `svchost`).
+- 📊 **Real-Time Hardware Telemetry**: Live CPU, RAM, Disk, and Battery diagnostics.
+
+### Phase 3 Features (Browser & Website Intelligence):
+- 🌐 **Browser Detection & Management**: Automatic detection of Chrome, Edge, Firefox, and Brave with default browser resolution.
+- 🔄 **Session Reuse**: Dispatches URLs to active browser processes without spawning duplicate instances or profile locks.
+- 🗃️ **Persistent Website Registry**: SQLite-backed knowledge base with URL validation and seed sites (ChatGPT, Gemini, Gmail, YouTube, Google Drive).
+- 🔍 **Live Search Engine**: Bing web search integration with clean URL resolution and provider search shortcuts (Google, YouTube).
+- 📄 **Webpage Content Understanding**: Heading extraction (`H1`-`H3`), executive summarization, and notable links analysis.
+- 🔒 **Security-First Auth Detection**: Automatically detects login pages and prompts for manual authentication without capturing credentials.
+- 🛠️ **Structured Tool Registry**: LLM tool calling schema preventing arbitrary script execution.
+
+### Phase 4 Features (AI Application Integration):
+- 🤖 **Modular AI Architecture**: Standardized provider interface supporting official Google Gemini and OpenAI ChatGPT APIs.
+- 🔄 **Runtime Provider Switching**: Switch between Gemini, OpenAI, and Local mode on the fly without restarting BOLT.
+- ⚖️ **Multi-AI Comparison**: Concurrently queries multiple AI services (e.g., Gemini and ChatGPT) with identical prompts and synthesizes consensus and stylistic differences.
+- 🛡️ **Zero-Faking Error Handling**: Provides actionable troubleshooting cards when credentials are missing or invalid, never feigning fake responses.
+- 📋 **AI Workflow Artifacts**: Prepares structured drafts (e.g. professional emails, error diagnoses) for future automated workflow pipelines.
+- 🌐 **Dual Integration Modes**: Method A (programmatic API queries) vs Method B (automated browser interaction via Phase 3 Browser Manager).
 
 ---
 
@@ -50,18 +70,10 @@ BOLT/
     │   ├── openai_provider.py
     │   ├── mock_provider.py
     │   └── router.py
-    ├── ui/               # PySide6 desktop interface
-    │   ├── main_window.py
-    │   ├── styles/
-    │   │   └── theme.py
-    │   └── components/
-    │       ├── header.py
-    │       ├── sidebar.py
-    │       ├── chat_view.py
-    │       ├── input_bar.py
-    │       ├── task_status.py
-    │       └── settings_dialog.py
-    └── tasks/            # Task engine scaffolding for Phase 2 & 5
+    ├── windows/          # Phase 2 Windows automation, discovery & dispatch
+    ├── browser/          # Phase 3 Browser detection, registry, search & content reader
+    ├── tasks/            # Tool registry & execution engine
+    └── ui/               # PySide6 desktop interface
 ```
 
 ---

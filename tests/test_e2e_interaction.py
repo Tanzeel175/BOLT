@@ -14,7 +14,9 @@ from pathlib import Path
 
 # Configure utf-8 encoding for console output on Windows
 if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -51,7 +53,8 @@ def run_e2e_test():
         print("[PASS] AI Worker finished and delivered response!")
         print(f"  Model: {response.model}")
         print(f"  Success: {response.success}")
-        print(f"  Response preview: {response.content[:120]}...")
+        safe_preview = response.content[:120].encode("ascii", errors="replace").decode("ascii")
+        print(f"  Response preview: {safe_preview}...")
         # Verify database record
         msgs = db.get_messages(initial_conv_id)
         print(f"  Total messages saved in SQLite: {len(msgs)}")

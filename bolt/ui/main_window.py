@@ -1,4 +1,4 @@
-"""Main Application Window for BOLT."""
+"""Main Application Window for BOLT with Windows Computer Understanding and Control."""
 
 from typing import List, Optional
 from PySide6.QtCore import Qt, QThread, Signal
@@ -12,6 +12,8 @@ from PySide6.QtWidgets import (
 
 from bolt.ai.base import ChatMessage, AIResponse
 from bolt.ai.router import AIRouter, get_ai_router
+from bolt.ai.provider_manager import get_provider_manager
+from bolt.ai.response_manager import get_response_manager
 from bolt.config.constants import (
     APP_NAME,
     APP_SUBTITLE,
@@ -30,31 +32,46 @@ from bolt.ui.components.chat_view import ChatView
 from bolt.ui.components.input_bar import InputBar
 from bolt.ui.components.task_status import TaskStatusBar
 from bolt.ui.components.settings_dialog import SettingsDialog
+from bolt.windows.intent_dispatcher import WindowsIntentDispatcher, get_intent_dispatcher
 
 logger = get_logger("MainWindow")
 
 
 class AIWorker(QThread):
-    """Background worker thread for non-blocking AI queries."""
+    """Background worker thread for non-blocking AI queries and streaming."""
     finished = Signal(object)  # Emits AIResponse
+    chunk_received = Signal(str)  # Emits streaming token chunks
 
-    def __init__(self, router: AIRouter, messages: List[ChatMessage], system_prompt: Optional[str] = None):
+    def __init__(
+        self,
+        router: AIRouter,
+        messages: List[ChatMessage],
+        system_prompt: Optional[str] = None,
+        provider_override: Optional[str] = None,
+    ):
         super().__init__()
         self.router = router
         self.messages = messages
         self.system_prompt = system_prompt
+        self.provider_override = provider_override
 
     def run(self):
         try:
-            response = self.router.generate(self.messages, self.system_prompt)
+            response = self.router.generate(
+                messages=self.messages,
+                system_prompt=self.system_prompt,
+                provider_override=self.provider_override,
+            )
             self.finished.emit(response)
         except Exception as e:
             logger.exception("AIWorker encountered an unexpected error.")
             err_resp = AIResponse(
                 content="",
                 model="error",
+                provider=self.provider_override or "",
                 success=False,
                 error=f"Worker exception: {e}",
+                error_type="INTERNAL_ERROR",
             )
             self.finished.emit(err_resp)
 
@@ -67,6 +84,7 @@ class MainWindow(QMainWindow):
         self.settings: Settings = get_settings()
         self.db: Database = get_database()
         self.ai_router: AIRouter = get_ai_router()
+        self.intent_dispatcher: WindowsIntentDispatcher = get_intent_dispatcher()
 
         self.current_conv_id: Optional[str] = None
         self.active_worker: Optional[AIWorker] = None
@@ -228,7 +246,7 @@ class MainWindow(QMainWindow):
             self.sidebar.set_conversations(conversations, active_id=self.current_conv_id)
 
     def _handle_user_message(self, text: str):
-        """Process user input, record in DB, update UI, and dispatch to AI worker."""
+        """Process user input, record in DB, update UI, and dispatch to Windows Engine or AI worker."""
         if not self.current_conv_id:
             self._start_new_chat()
 
@@ -252,21 +270,70 @@ class MainWindow(QMainWindow):
             conversations = self.db.get_conversations()
             self.sidebar.set_conversations(conversations, active_id=self.current_conv_id)
 
-        # 4. Set UI to busy / thinking state
-        self.input_bar.set_busy(True)
-        self.status_bar.set_thinking(f"Thinking with {self.settings.provider.upper()}...")
+        # 4. Check if instruction is a direct Windows, Browser, or AI Management Operation
+        self.last_user_prompt = text
+        intent = self.intent_dispatcher.dispatch(text)
+        if intent.is_windows_action:
+            is_browser_action = intent.action_type in [
+                "open_website", "open_url", "multi_tab_navigation",
+                "search_web", "switch_tab", "read_webpage", "list_browsers"
+            ]
+            if intent.action_type == "switch_ai_provider":
+                model_used = "BOLT Provider Manager"
+                self.settings = get_settings(reload=True)
+                self.ai_router = get_ai_router()
+                self._sync_header_badge()
+            elif intent.action_type == "compare_ai":
+                model_used = "BOLT Multi-AI Engine"
+            else:
+                model_used = "BOLT Browser Intelligence" if is_browser_action else "BOLT Windows Engine"
 
-        # 5. Build ChatMessage history for AI model
+            # Store assistant action response in SQLite
+            self.db.add_message(
+                conversation_id=self.current_conv_id,
+                role="assistant",
+                content=intent.content,
+                model=model_used,
+            )
+            # Render response card
+            self.chat_view.add_message(
+                role="assistant",
+                content=intent.content,
+                model=model_used,
+            )
+            if intent.success:
+                if is_browser_action and intent.action_type in ["open_website", "open_url", "multi_tab_navigation"]:
+                    self.status_bar.set_browser_activity("Browser", intent.title, status="Active")
+                else:
+                    self.status_bar.set_ready(f"Completed • {intent.title}")
+            else:
+                self.status_bar.set_error(intent.title)
+            return
+
+        # 5. Otherwise, pass to AI Generative Model
+        provider_override = None
+        prompt_text = text
+        if intent.action_type == "query_provider" and intent.raw_data:
+            provider_override = intent.raw_data.get("provider_override")
+            prompt_text = intent.raw_data.get("prompt", text)
+
+        active_label = (provider_override or self.settings.provider).upper()
+        self.input_bar.set_busy(True)
+        self.status_bar.set_thinking(f"Thinking with {active_label}...")
+
+        # Build ChatMessage history for AI model
         chat_history = [
             ChatMessage(role=m["role"], content=m["content"])
-            for m in messages
+            for m in messages[:-1]
         ]
+        chat_history.append(ChatMessage(role="user", content=prompt_text))
 
-        # 6. Launch background worker thread
+        # Launch background worker thread
         self.active_worker = AIWorker(
             router=self.ai_router,
             messages=chat_history,
             system_prompt=self.settings.system_prompt,
+            provider_override=provider_override,
         )
         self.active_worker.finished.connect(self._on_ai_response_received)
         self.active_worker.start()
@@ -274,17 +341,24 @@ class MainWindow(QMainWindow):
     def _on_ai_response_received(self, response: AIResponse):
         """Handle AI completion returned by background worker."""
         self.input_bar.set_busy(False)
+        resp_mgr = get_response_manager()
+
+        formatted_content = resp_mgr.format_assistant_message(
+            response=response,
+            original_prompt=getattr(self, "last_user_prompt", ""),
+        )
+
+        model_used = response.model or self.settings.provider.title()
+        if response.provider:
+            model_used = f"{response.provider.title()}: {response.model}"
 
         if response.success:
-            content = response.content
-            model_used = response.model
-
             # Save assistant message to SQLite
             if self.current_conv_id:
                 self.db.add_message(
                     conversation_id=self.current_conv_id,
                     role="assistant",
-                    content=content,
+                    content=formatted_content,
                     model=model_used,
                     tokens=response.tokens_used,
                 )
@@ -292,29 +366,33 @@ class MainWindow(QMainWindow):
             # Display assistant message card
             self.chat_view.add_message(
                 role="assistant",
-                content=content,
+                content=formatted_content,
                 model=model_used,
             )
-            self.status_bar.set_ready(f"Completed • Model: {model_used}")
+            time_badge = f" ({response.duration_seconds}s)" if response.duration_seconds else ""
+            self.status_bar.set_ready(f"Completed • Model: {model_used}{time_badge}")
             logger.info("AI response received and rendered successfully.")
         else:
             err_msg = response.error or "Unknown error generating response."
-            self.status_bar.set_error(err_msg)
+            self.status_bar.set_error(f"{response.provider.title()}: {response.error_type or 'Error'}")
 
-            # Render an error alert message card in chat
-            error_card_content = (
-                f"### ⚠️ Could not generate response\n\n"
-                f"**Error Details:** `{err_msg}`\n\n"
-                f"**How to resolve:**\n"
-                f"- If using Gemini or OpenAI, verify your API Key in **Settings (⚙)**.\n"
-                f"- Check your internet connectivity.\n"
-                f"- You can switch provider to **Local / Mock Mode** in Settings."
-            )
+            # Store failed / diagnostic response in SQLite as well
+            if self.current_conv_id:
+                self.db.add_message(
+                    conversation_id=self.current_conv_id,
+                    role="assistant",
+                    content=formatted_content,
+                    model="System Alert",
+                    tokens=0,
+                )
+
+            # Render formatted actionable alert message card in chat
             self.chat_view.add_message(
                 role="assistant",
-                content=error_card_content,
+                content=formatted_content,
                 model="System Alert",
             )
+            logger.warning(f"AI response failed: {err_msg}")
             logger.warning(f"AI response failed: {err_msg}")
 
     def _open_settings(self):
@@ -330,4 +408,3 @@ class MainWindow(QMainWindow):
         self._sync_header_badge()
         self.status_bar.set_ready("Settings updated successfully")
         logger.info("Settings reloaded and synced across UI.")
-

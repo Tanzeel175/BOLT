@@ -41,7 +41,7 @@ class TaskStatusBar(QFrame):
         layout.addStretch()
 
         # System Telemetry
-        sys_info = f"Windows 11 | Python {platform.python_version()} | Phase 1 Foundation"
+        sys_info = f"Windows 11 | Python {platform.python_version()} | Phase 3 Browser Intelligence"
         self.sys_label = QLabel(sys_info)
         self.sys_label.setStyleSheet("font-size: 11px; color: #484f58;")
         layout.addWidget(self.sys_label)
@@ -69,4 +69,11 @@ class TaskStatusBar(QFrame):
         self.status_dot.setStyleSheet("color: #f85149; font-size: 13px;")
         self.status_label.setText("Error")
         self.task_detail_label.setText(message)
+
+    def set_browser_activity(self, browser: str, site_or_url: str, status: str = "Navigated"):
+        """Display real-time browser and website navigation status in the status bar."""
+        self.status_dot.setObjectName("status_dot_busy")
+        self.status_dot.setStyleSheet("color: #58a6ff; font-size: 13px;")
+        self.status_label.setText(f"{browser} • {status}")
+        self.task_detail_label.setText(site_or_url)
 

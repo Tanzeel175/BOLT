@@ -1,10 +1,11 @@
 """Settings management for BOLT, supporting .env and runtime persistence."""
 
 import os
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
-from dotenv import load_dotenv, set_key
+from dotenv import load_dotenv
 
 from .constants import (
     ROOT_DIR,
@@ -80,19 +81,35 @@ class Settings:
         )
 
     def save(self) -> None:
-        """Persist current settings to .env file."""
-        if not ENV_FILE.exists():
-            ENV_FILE.touch()
+        """Persist current settings directly to .env file in one atomic operation."""
+        lines = [
+            "# BOLT - AI Assistant Environment Configuration",
+            "",
+            "# Primary AI Provider: 'gemini', 'openai', or 'mock'",
+            f"BOLT_AI_PROVIDER={self.provider}",
+            "",
+            "# Google Gemini API",
+            f"GEMINI_API_KEY={self.gemini_api_key}",
+            f"GEMINI_MODEL={self.gemini_model}",
+            "",
+            "# OpenAI API",
+            f"OPENAI_API_KEY={self.openai_api_key}",
+            f"OPENAI_MODEL={self.openai_model}",
+            f"OPENAI_BASE_URL={self.openai_base_url}",
+            "",
+            "# General Settings",
+            f"BOLT_TEMPERATURE={self.temperature}",
+            f"BOLT_MAX_TOKENS={self.max_tokens}",
+            f"BOLT_LOG_LEVEL={self.log_level}",
+        ]
+        content = "\n".join(lines) + "\n"
 
-        set_key(str(ENV_FILE), "BOLT_AI_PROVIDER", self.provider)
-        set_key(str(ENV_FILE), "GEMINI_API_KEY", self.gemini_api_key)
-        set_key(str(ENV_FILE), "GEMINI_MODEL", self.gemini_model)
-        set_key(str(ENV_FILE), "OPENAI_API_KEY", self.openai_api_key)
-        set_key(str(ENV_FILE), "OPENAI_MODEL", self.openai_model)
-        set_key(str(ENV_FILE), "OPENAI_BASE_URL", self.openai_base_url)
-        set_key(str(ENV_FILE), "BOLT_TEMPERATURE", str(self.temperature))
-        set_key(str(ENV_FILE), "BOLT_MAX_TOKENS", str(self.max_tokens))
-        set_key(str(ENV_FILE), "BOLT_LOG_LEVEL", self.log_level)
+        for attempt in range(3):
+            try:
+                ENV_FILE.write_text(content, encoding="utf-8")
+                break
+            except Exception:
+                time.sleep(0.05)
 
         # Update current process environment as well
         os.environ["BOLT_AI_PROVIDER"] = self.provider
@@ -148,4 +165,3 @@ def get_settings(reload: bool = False) -> Settings:
     if _SETTINGS_INSTANCE is None or reload:
         _SETTINGS_INSTANCE = Settings.load()
     return _SETTINGS_INSTANCE
-

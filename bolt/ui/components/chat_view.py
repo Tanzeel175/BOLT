@@ -265,10 +265,10 @@ class ChatView(QScrollArea):
         sug_layout.setSpacing(10)
 
         prompts = [
+            "Open Notepad",
+            "List running applications",
+            "System specifications",
             "Explain recursion in C++",
-            "Show system specifications",
-            "How can BOLT control Windows?",
-            "Configure AI API keys",
         ]
 
         for p in prompts:
@@ -326,4 +326,3 @@ class ChatView(QScrollArea):
         vbar = self.verticalScrollBar()
         if vbar:
             vbar.setValue(vbar.maximum())
-

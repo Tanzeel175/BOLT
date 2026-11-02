@@ -1,11 +1,8 @@
-"""AI Router to dispatch requests to the active provider."""
+"""AI Router to dispatch requests to the active or requested provider."""
 
-from typing import List, Optional
+from typing import Iterator, List, Optional
 from bolt.ai.base import AIProvider, AIResponse, ChatMessage
-from bolt.ai.gemini_provider import GeminiProvider
-from bolt.ai.openai_provider import OpenAIProvider
-from bolt.ai.mock_provider import MockProvider
-from bolt.config.constants import PROVIDER_GEMINI, PROVIDER_OPENAI, PROVIDER_MOCK
+from bolt.ai.provider_manager import AIProviderManager, get_provider_manager
 from bolt.config.settings import Settings, get_settings
 from bolt.core.logger import get_logger
 
@@ -13,44 +10,29 @@ logger = get_logger("AIRouter")
 
 
 class AIRouter:
-    def __init__(self, settings: Optional[Settings] = None):
+    def __init__(
+        self,
+        settings: Optional[Settings] = None,
+        provider_mgr: Optional[AIProviderManager] = None,
+    ):
         self.settings = settings or get_settings()
+        self.provider_mgr = provider_mgr or get_provider_manager()
 
-    def get_provider(self) -> AIProvider:
-        """Resolve and instantiate the active AI provider based on settings."""
-        provider_name = self.settings.provider.lower()
-
-        if provider_name == PROVIDER_GEMINI:
-            if not self.settings.gemini_api_key.strip():
-                logger.info("No Gemini API key found; falling back to Mock/Local provider.")
-                return MockProvider()
-            return GeminiProvider(
-                api_key=self.settings.gemini_api_key,
-                model=self.settings.gemini_model,
-            )
-
-        elif provider_name == PROVIDER_OPENAI:
-            if not self.settings.openai_api_key.strip():
-                logger.info("No OpenAI API key found; falling back to Mock/Local provider.")
-                return MockProvider()
-            return OpenAIProvider(
-                api_key=self.settings.openai_api_key,
-                model=self.settings.openai_model,
-                base_url=self.settings.openai_base_url,
-            )
-
-        else:
-            return MockProvider()
+    def get_provider(self, name_or_override: Optional[str] = None) -> AIProvider:
+        """Resolve the target provider, respecting explicit overrides."""
+        target = name_or_override or self.settings.provider
+        return self.provider_mgr.get_provider(target)
 
     def generate(
         self,
         messages: List[ChatMessage],
         system_prompt: Optional[str] = None,
+        provider_override: Optional[str] = None,
     ) -> AIResponse:
-        """Route generation request to the active provider."""
-        provider = self.get_provider()
+        """Route generation request to the active or explicitly requested provider."""
+        provider = self.get_provider(provider_override)
         sys_prompt = system_prompt or self.settings.system_prompt
-        logger.info(f"Routing request to provider: {provider.provider_name}")
+        logger.info(f"Routing request to provider: {provider.display_name} ({provider.provider_name})")
 
         response = provider.generate_response(
             messages=messages,
@@ -61,6 +43,24 @@ class AIRouter:
 
         return response
 
+    def stream(
+        self,
+        messages: List[ChatMessage],
+        system_prompt: Optional[str] = None,
+        provider_override: Optional[str] = None,
+    ) -> Iterator[str]:
+        """Stream chunks from the active or explicitly requested provider."""
+        provider = self.get_provider(provider_override)
+        sys_prompt = system_prompt or self.settings.system_prompt
+        logger.info(f"Streaming request from provider: {provider.display_name}")
+
+        return provider.stream_response(
+            messages=messages,
+            system_prompt=sys_prompt,
+            temperature=self.settings.temperature,
+            max_tokens=self.settings.max_tokens,
+        )
+
 
 _ROUTER_INSTANCE: Optional[AIRouter] = None
 
@@ -70,4 +70,3 @@ def get_ai_router() -> AIRouter:
     if _ROUTER_INSTANCE is None:
         _ROUTER_INSTANCE = AIRouter()
     return _ROUTER_INSTANCE
-
