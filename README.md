@@ -54,6 +54,16 @@
   - **Workflow C (Programming Assistance)**: Locate project -> Open in VS Code -> Run in sandbox -> AI error diagnosis -> Require approval before modifying code.
   - **Workflow D (Document Processing)**: Locate document -> Read content -> Summarize -> Write separate file -> Verify file integrity.
 
+#### 6. Offline-First Intelligence & Real Computer Control
+- 🧠 **Ollama Local AI as Default Brain**: Connects to `http://127.0.0.1:11434` with recommended model `gemma4:e2b`. Zero cloud dependency for core computer actions.
+- 🛡️ **Zero Automatic Downloads & Zero Silent Cloud Fallback**: If the local model is not downloaded, BOLT informs the user with exact terminal instructions (`ollama run gemma4:e2b`) without downloading gigabytes behind the user's back or silently leaking queries to cloud APIs.
+- 🔌 **Fast Internet Detection & Graceful Offline Exit**: DNS socket probes detect internet disconnection in milliseconds. If online search is requested offline, BOLT immediately reports:
+  `"No internet connection detected. Online search is unavailable. Local BOLT functionality is still available."`
+- ⚖️ **Mixed-Task Partial Completion (`PARTIALLY_COMPLETED`)**: For mixed tasks (e.g. *"Open Calculator and search for AI news"*), offline search failure does not cancel local operations.
+- ⌨️ **Real Computer Control Tools (18 Tools)**: Win32 `SendInput` Unicode typing into active windows, key presses, hotkeys, screen capture, file read/write with OneDrive/Desktop alias resolution, and application lifecycle controls.
+- 💾 **Persistent Learning Memory**: 7 SQLite memory categories, user correction learning with prompt context injection, and LoRA fine-tuning JSONL dataset export.
+- 🗣️ **Local Windows Voice (TTS)**: Offline speech synthesis using Windows Native SAPI.SpVoice with zero cloud API dependencies.
+
 ---
 
 ## 📁 Project Architecture
@@ -68,24 +78,26 @@ BOLT/
 ├── DEVELOPMENT_PROGRESS.md # Phase-by-phase development tracker
 ├── run.py                # Main application entry point
 ├── data/
-│   └── bolt.db           # SQLite database (conversations, registry, workflows, tasks)
+│   └── bolt.db           # SQLite database (conversations, registry, workflows, tasks, memory)
 ├── logs/
 │   └── bolt.log          # Application log file (rotating)
 ├── tests/
-│   ├── test_e2e_interaction.py       # Phase 1 UI E2E test
-│   ├── test_phase2.py                # Phase 2 Windows control tests
-│   ├── test_phase3.py                # Phase 3 browser tests
-│   ├── test_phase3_ui_interaction.py # Phase 3 UI E2E test
-│   ├── test_phase4.py                # Phase 4 AI integration tests
-│   ├── test_phase4_ui_interaction.py # Phase 4 UI E2E test
-│   ├── test_phase5.py                # Phase 5 Task Planning tests
-│   └── test_phase5_ui_interaction.py # Phase 5 UI E2E test
+│   ├── test_e2e_interaction.py          # Phase 1 UI E2E test
+│   ├── test_phase2.py                   # Phase 2 Windows control tests
+│   ├── test_phase3.py                   # Phase 3 browser tests
+│   ├── test_phase3_ui_interaction.py    # Phase 3 UI E2E test
+│   ├── test_phase4.py                   # Phase 4 AI integration tests
+│   ├── test_phase4_ui_interaction.py    # Phase 4 AI E2E test
+│   ├── test_phase5.py                   # Phase 5 Task Planning tests
+│   ├── test_phase5_ui_interaction.py    # Phase 5 UI E2E test
+│   └── test_offline_and_real_control.py # Offline-First, Ollama, & Real Control tests
 └── bolt/
     ├── config/           # Application constants & settings management
-    ├── core/             # SQLite persistence, telemetry, and logger
-    ├── ai/               # Multi-provider AI system, comparator, router
-    ├── browser/          # Browser detector, Playwright controller, registry, reader
-    ├── windows/          # App discovery, lifecycle, window & file managers, intent dispatcher
+    ├── core/             # SQLite persistence, network manager, learning memory, logger
+    ├── ai/               # OllamaProvider, GeminiProvider, OpenAIProvider, router, comparator
+    ├── browser/          # Browser detector, Playwright controller, registry, reader, search
+    ├── windows/          # App discovery, lifecycle, input controller (SendInput), file manager
+    ├── voice/            # Local Windows SAPI voice synthesis
     ├── ui/               # PySide6 desktop interface and components
     │   └── components/   # Header, Sidebar, ChatView, InputBar, TaskStatus, TaskActivityPanel
     └── tasks/            # Models, Planner, DependencyManager, ExecutionEngine, Recovery, Memory
@@ -96,35 +108,31 @@ BOLT/
 ## 🚀 Getting Started
 
 ### 1. Requirements
-- Windows 11 64-bit
+- Windows 11 64-bit (Intel Core i7 / i5, 16 GB RAM)
 - Python 3.10+ (tested on Python 3.13)
 - Playwright browsers: `playwright install msedge` / `playwright install chromium`
+- Ollama runtime (for offline local AI): [ollama.ai](https://ollama.ai)
 
-### 2. Launching BOLT
+### 2. Setting Up Local AI (Ollama)
+Ollama is the default offline brain for BOLT:
+```powershell
+# In PowerShell:
+ollama run gemma4:e2b
+```
+
+### 3. Launching BOLT
 Run with the virtual environment Python:
 ```powershell
 .\.venv\Scripts\python.exe run.py
 ```
 
-### 3. Running Automated Tests
+### 4. Running Automated Tests
 ```powershell
-# Phase 1
-.\.venv\Scripts\python.exe -u tests/test_e2e_interaction.py
+# Run the complete test suite (59 tests):
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"
 
-# Phase 2
-.\.venv\Scripts\python.exe -u tests/test_phase2.py
-
-# Phase 3
-.\.venv\Scripts\python.exe -u tests/test_phase3.py
-.\.venv\Scripts\python.exe -u tests/test_phase3_ui_interaction.py
-
-# Phase 4
-.\.venv\Scripts\python.exe -u tests/test_phase4.py
-.\.venv\Scripts\python.exe -u tests/test_phase4_ui_interaction.py
-
-# Phase 5
-.\.venv\Scripts\python.exe -u tests/test_phase5.py
-.\.venv\Scripts\python.exe -u tests/test_phase5_ui_interaction.py
+# Run Offline-First and Real Control verification (12 tests):
+.\.venv\Scripts\python.exe -m unittest tests/test_offline_and_real_control.py
 ```
 
 ---

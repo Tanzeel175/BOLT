@@ -81,10 +81,19 @@ class ExecutionEngine:
                     break
 
                 # If no steps are pending, or remaining pending steps have unmet dependencies that failed
+                failed_step_ids = {s.step_id for s in plan.steps if s.status == TaskStatus.FAILED}
+                for s in plan.steps:
+                    if s.status == TaskStatus.PENDING and any(d in failed_step_ids for d in s.dependencies):
+                        s.status = TaskStatus.SKIPPED
+                        s.error = "Skipped because prerequisite step failed."
+
                 has_pending = any(s.status == TaskStatus.PENDING for s in plan.steps)
                 if has_pending:
                     logger.error("Deadlock or unmet dependencies detected in plan execution.")
-                    plan.status = TaskStatus.FAILED
+                    if any(s.status == TaskStatus.COMPLETED for s in plan.steps):
+                        plan.status = TaskStatus.PARTIALLY_COMPLETED
+                    else:
+                        plan.status = TaskStatus.FAILED
                 break
 
             # Determine whether independent ready steps can run in parallel
@@ -121,6 +130,13 @@ class ExecutionEngine:
                 plan=plan,
                 result_summary="Completed successfully with verified deliverables.",
             )
+        elif any(s.status == TaskStatus.COMPLETED for s in plan.steps) and any(s.status == TaskStatus.FAILED for s in plan.steps):
+            plan.status = TaskStatus.PARTIALLY_COMPLETED
+            plan.completed_at = utc_now_iso()
+            logger.info(f"Plan partially completed: {plan.title} (some steps succeeded, some failed)")
+        elif plan.status not in (TaskStatus.WAITING_APPROVAL, TaskStatus.CANCELLED):
+            plan.status = TaskStatus.FAILED
+            plan.completed_at = utc_now_iso()
 
         # Update final state in database
         self.db.update_task_record(

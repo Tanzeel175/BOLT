@@ -17,6 +17,7 @@ class TaskStatus(str, Enum):
     PAUSED = "paused"
     WAITING_APPROVAL = "waiting_approval"
     COMPLETED = "completed"
+    PARTIALLY_COMPLETED = "partially_completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
     SKIPPED = "skipped"
@@ -135,8 +136,18 @@ class ExecutionPlan:
         return all(s.status in (TaskStatus.COMPLETED, TaskStatus.SKIPPED) for s in self.steps)
 
     def is_failed(self) -> bool:
-        """Check if any step has critically failed."""
+        """Check if all non-skipped steps have failed or no progress was made."""
+        if not self.steps:
+            return False
+        has_any_completed = any(s.status == TaskStatus.COMPLETED for s in self.steps)
+        all_done = all(s.status in (TaskStatus.FAILED, TaskStatus.SKIPPED, TaskStatus.CANCELLED) for s in self.steps)
+        return all_done and not has_any_completed
+
+    def has_failures(self) -> bool:
         return any(s.status == TaskStatus.FAILED for s in self.steps)
+
+    def has_successes(self) -> bool:
+        return any(s.status == TaskStatus.COMPLETED for s in self.steps)
 
     def progress_percentage(self) -> float:
         """Calculate overall percentage of completed steps."""

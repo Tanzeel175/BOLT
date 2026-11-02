@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urlparse
 
 from bolt.core.logger import get_logger
+from bolt.core.network_manager import get_network_manager, OFFLINE_SEARCH_ERROR_MESSAGE
 from bolt.browser.browser_detector import BrowserDetector, get_browser_detector
 from bolt.browser.website_registry import WebsiteRegistry, get_website_registry
 from bolt.browser.content_reader import ContentReader, get_content_reader
@@ -130,6 +131,17 @@ class BrowserController:
             target_url = self.registry.normalize_url(clean_input)
             display_name = urlparse(target_url).netloc
             site_name = display_name
+
+        # Check connectivity for external web addresses
+        if not any(target_url.startswith(p) for p in ["http://localhost", "http://127.0.0.1", "file://"]):
+            if not get_network_manager().is_internet_available():
+                return {
+                    "success": False,
+                    "error": OFFLINE_SEARCH_ERROR_MESSAGE,
+                    "url": target_url,
+                    "display_name": display_name,
+                    "is_offline": True,
+                }
 
         # 2. Initialize browser
         if not self._ensure_browser(preferred_browser):
@@ -398,22 +410,59 @@ class BrowserController:
     ) -> Dict[str, Any]:
         """
         Execute internet search, retrieve results, and optionally open search page in browser.
+        Distinguishes offline state and stops immediately without retrying or inventing results.
         """
-        results = self.search_engine.search_online(query)
-        summary_md = self.search_engine.format_results_markdown(query, results, provider=provider)
-        search_url = self.search_engine.build_search_url(query, provider)
+        net_mgr = get_network_manager()
+        if not net_mgr.is_internet_available():
+            logger.warning("Search aborted: Internet connection is unavailable.")
+            return {
+                "success": False,
+                "error": OFFLINE_SEARCH_ERROR_MESSAGE,
+                "query": query,
+                "provider": provider,
+                "is_offline": True,
+            }
 
-        if open_in_browser:
-            self.open_url(search_url, new_tab=True)
+        try:
+            results = self.search_engine.search_online(query)
+            summary_md = self.search_engine.format_results_markdown(query, results, provider=provider)
+            search_url = self.search_engine.build_search_url(query, provider)
 
-        return {
-            "success": True,
-            "query": query,
-            "provider": provider,
-            "search_url": search_url,
-            "results": results,
-            "summary_md": summary_md,
-        }
+            if open_in_browser:
+                self.open_url(search_url, new_tab=True)
+
+            return {
+                "success": True,
+                "query": query,
+                "provider": provider,
+                "search_url": search_url,
+                "results": results,
+                "summary_md": summary_md,
+            }
+        except ConnectionError:
+            return {
+                "success": False,
+                "error": OFFLINE_SEARCH_ERROR_MESSAGE,
+                "query": query,
+                "provider": provider,
+                "is_offline": True,
+            }
+        except Exception as e:
+            classified = net_mgr.classify_browser_error(e)
+            if not net_mgr.is_internet_available():
+                return {
+                    "success": False,
+                    "error": OFFLINE_SEARCH_ERROR_MESSAGE,
+                    "query": query,
+                    "provider": provider,
+                    "is_offline": True,
+                }
+            return {
+                "success": False,
+                "error": f"Search failed: {e}",
+                "query": query,
+                "provider": provider,
+            }
 
     def close_browser(self) -> None:
         """Safely close active browser context and engine."""

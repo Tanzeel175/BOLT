@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from bolt.core.logger import get_logger
+from bolt.core.network_manager import get_network_manager, OFFLINE_SEARCH_ERROR_MESSAGE
 
 logger = get_logger("SearchEngine")
 
@@ -42,7 +43,13 @@ class SearchEngine:
         Execute an online search query.
         Uses DuckDuckGo Instant Topic / Related Topic API + structured fallback.
         Returns list of {title, url, snippet}.
+        Raises ConnectionError if internet is unavailable.
         """
+        net_mgr = get_network_manager()
+        if not net_mgr.is_internet_available():
+            logger.warning("Search aborted: No internet connectivity detected.")
+            raise ConnectionError(OFFLINE_SEARCH_ERROR_MESSAGE)
+
         logger.info(f"Executing web search for: '{query}'")
         clean_query = query.strip()
         results: List[Dict[str, str]] = []

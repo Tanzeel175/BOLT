@@ -19,7 +19,7 @@ LOG_FILE_PATH = LOGS_DIR / "bolt.log"
 # Application Identity
 APP_NAME = "BOLT"
 APP_SUBTITLE = "Autonomous Windows AI Assistant"
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.2.0"
 APP_ORGANIZATION = "BOLT Systems"
 
 # Window Default Dimensions
@@ -29,16 +29,19 @@ MIN_WINDOW_WIDTH = 850
 MIN_WINDOW_HEIGHT = 550
 
 # Provider Constants
+PROVIDER_OLLAMA = "ollama"
 PROVIDER_GEMINI = "gemini"
 PROVIDER_OPENAI = "openai"
 PROVIDER_MOCK = "mock"
 
 AVAILABLE_PROVIDERS = [
+    PROVIDER_OLLAMA,
     PROVIDER_GEMINI,
     PROVIDER_OPENAI,
     PROVIDER_MOCK,
 ]
 
+DEFAULT_OLLAMA_MODEL = "gemma4:e2b"
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 DEFAULT_TEMPERATURE = 0.7
@@ -51,4 +54,3 @@ DEFAULT_SYSTEM_PROMPT = (
     "solve technical problems, manage workflows, browse the web, write code, and organize information. "
     "Respond in clean, well-formatted markdown. Be professional, direct, and helpful."
 )
-

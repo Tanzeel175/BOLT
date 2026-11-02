@@ -303,6 +303,41 @@ class AppController:
         running_apps.sort(key=lambda x: x["memory_mb"], reverse=True)
         return running_apps
 
+    def switch_application(self, query: str) -> Dict[str, Any]:
+        """Switch focus to a running application by name or window title."""
+        logger.info(f"Switch application requested: '{query}'")
+        clean = query.strip()
+
+        # 1. Try finding window by title directly
+        win = self.window_mgr.find_window_by_title(clean)
+        if win:
+            self.window_mgr.switch_to_window(win.hwnd)
+            return {
+                "success": True,
+                "app_name": win.title,
+                "hwnd": win.hwnd,
+                "message": f"Switched to '{win.title}'.",
+            }
+
+        # 2. Try matching running processes
+        running, pids = self.is_app_running(clean)
+        if running:
+            windows = self.window_mgr.get_visible_windows()
+            for w in windows:
+                if w.pid in pids:
+                    self.window_mgr.switch_to_window(w.hwnd)
+                    return {
+                        "success": True,
+                        "app_name": w.title,
+                        "hwnd": w.hwnd,
+                        "message": f"Switched to '{w.title}'.",
+                    }
+
+        return {
+            "success": False,
+            "error": f"Could not find open application or window matching '{query}'.",
+        }
+
 
 _APP_CONTROLLER_INSTANCE: Optional[AppController] = None
 

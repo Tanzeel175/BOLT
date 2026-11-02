@@ -1,16 +1,19 @@
 """Settings management for BOLT, supporting .env and runtime persistence."""
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 from dotenv import load_dotenv
 
 from .constants import (
     ROOT_DIR,
+    PROVIDER_OLLAMA,
     PROVIDER_GEMINI,
     PROVIDER_OPENAI,
     PROVIDER_MOCK,
+    AVAILABLE_PROVIDERS,
+    DEFAULT_OLLAMA_MODEL,
     DEFAULT_GEMINI_MODEL,
     DEFAULT_OPENAI_MODEL,
     DEFAULT_TEMPERATURE,
@@ -23,7 +26,11 @@ ENV_FILE = ROOT_DIR / ".env"
 
 @dataclass
 class Settings:
-    provider: str = PROVIDER_GEMINI
+    provider: str = PROVIDER_OLLAMA
+    ollama_model: str = DEFAULT_OLLAMA_MODEL
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_context_size: int = 2048
+    ollama_cpu_threads: int = 4
     gemini_api_key: str = ""
     gemini_model: str = DEFAULT_GEMINI_MODEL
     openai_api_key: str = ""
@@ -42,9 +49,20 @@ class Settings:
         else:
             load_dotenv(override=True)
 
-        provider = os.getenv("BOLT_AI_PROVIDER", PROVIDER_GEMINI).strip().lower()
-        if provider not in (PROVIDER_GEMINI, PROVIDER_OPENAI, PROVIDER_MOCK):
-            provider = PROVIDER_GEMINI
+        provider = os.getenv("BOLT_AI_PROVIDER", PROVIDER_OLLAMA).strip().lower()
+        if provider not in AVAILABLE_PROVIDERS:
+            provider = PROVIDER_OLLAMA
+
+        ollama_model = os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL).strip()
+        ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").strip()
+        try:
+            ollama_context_size = int(os.getenv("OLLAMA_CONTEXT_SIZE", "2048"))
+        except ValueError:
+            ollama_context_size = 2048
+        try:
+            ollama_cpu_threads = int(os.getenv("OLLAMA_CPU_THREADS", "4"))
+        except ValueError:
+            ollama_cpu_threads = 4
 
         gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
         gemini_model = os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip()
@@ -68,6 +86,10 @@ class Settings:
 
         return cls(
             provider=provider,
+            ollama_model=ollama_model,
+            ollama_base_url=ollama_base_url,
+            ollama_context_size=ollama_context_size,
+            ollama_cpu_threads=ollama_cpu_threads,
             gemini_api_key=gemini_api_key,
             gemini_model=gemini_model,
             openai_api_key=openai_api_key,
@@ -83,6 +105,10 @@ class Settings:
         """Persist current settings to .env file atomically."""
         new_values = {
             "BOLT_AI_PROVIDER": self.provider,
+            "OLLAMA_MODEL": self.ollama_model,
+            "OLLAMA_BASE_URL": self.ollama_base_url,
+            "OLLAMA_CONTEXT_SIZE": str(self.ollama_context_size),
+            "OLLAMA_CPU_THREADS": str(self.ollama_cpu_threads),
             "GEMINI_API_KEY": self.gemini_api_key,
             "GEMINI_MODEL": self.gemini_model,
             "OPENAI_API_KEY": self.openai_api_key,
@@ -102,6 +128,10 @@ class Settings:
 
         # Update current process environment as well
         os.environ["BOLT_AI_PROVIDER"] = self.provider
+        os.environ["OLLAMA_MODEL"] = self.ollama_model
+        os.environ["OLLAMA_BASE_URL"] = self.ollama_base_url
+        os.environ["OLLAMA_CONTEXT_SIZE"] = str(self.ollama_context_size)
+        os.environ["OLLAMA_CPU_THREADS"] = str(self.ollama_cpu_threads)
         os.environ["GEMINI_API_KEY"] = self.gemini_api_key
         os.environ["GEMINI_MODEL"] = self.gemini_model
         os.environ["OPENAI_API_KEY"] = self.openai_api_key
@@ -123,15 +153,17 @@ class Settings:
     @property
     def current_model(self) -> str:
         """Return the model name for the currently active provider."""
-        if self.provider == PROVIDER_GEMINI:
+        if self.provider == PROVIDER_OLLAMA:
+            return self.ollama_model
+        elif self.provider == PROVIDER_GEMINI:
             return self.gemini_model
         elif self.provider == PROVIDER_OPENAI:
             return self.openai_model
         return "mock-offline-engine"
 
     def has_active_api_key(self) -> bool:
-        """Check if an API key is present for the active cloud provider."""
-        if self.provider == PROVIDER_MOCK:
+        """Check if active provider is ready (local models do not require API keys)."""
+        if self.provider in (PROVIDER_OLLAMA, PROVIDER_MOCK):
             return True
         return bool(self.current_api_key.strip())
 

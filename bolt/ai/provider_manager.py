@@ -1,7 +1,7 @@
 """AI Provider Manager for BOLT.
 
 Detects, configures, tests, and orchestrates active and alternative AI providers.
-Supports runtime switching between Gemini, OpenAI, and local engines without restarts.
+Supports runtime switching between Ollama, Gemini, OpenAI, and mock engines without restarts.
 """
 
 from dataclasses import dataclass
@@ -10,13 +10,16 @@ from typing import Any, Dict, List, Optional, Tuple
 from bolt.ai.base import AIProvider
 from bolt.ai.gemini_provider import GeminiProvider
 from bolt.ai.mock_provider import MockProvider
+from bolt.ai.ollama_provider import OllamaProvider
 from bolt.ai.openai_provider import OpenAIProvider
 from bolt.config.constants import (
     AVAILABLE_PROVIDERS,
     DEFAULT_GEMINI_MODEL,
+    DEFAULT_OLLAMA_MODEL,
     DEFAULT_OPENAI_MODEL,
     PROVIDER_GEMINI,
     PROVIDER_MOCK,
+    PROVIDER_OLLAMA,
     PROVIDER_OPENAI,
 )
 from bolt.config.settings import Settings, get_settings
@@ -60,6 +63,12 @@ class AIProviderManager:
 
     def _initialize_providers(self) -> None:
         """Instantiate providers using current settings."""
+        self._providers[PROVIDER_OLLAMA] = OllamaProvider(
+            base_url=self.settings.ollama_base_url,
+            model=self.settings.ollama_model,
+            context_size=self.settings.ollama_context_size,
+            cpu_threads=self.settings.ollama_cpu_threads,
+        )
         self._providers[PROVIDER_GEMINI] = GeminiProvider(
             api_key=self.settings.gemini_api_key,
             model=self.settings.gemini_model,
@@ -74,7 +83,7 @@ class AIProviderManager:
     def _sync_with_db(self) -> None:
         """Sync provider preferences with SQLite database."""
         try:
-            for p_id in [PROVIDER_GEMINI, PROVIDER_OPENAI, PROVIDER_MOCK]:
+            for p_id in AVAILABLE_PROVIDERS:
                 pref = self.db.get_provider_preference(p_id)
                 provider = self._providers.get(p_id)
                 if not provider:
@@ -82,14 +91,14 @@ class AIProviderManager:
 
                 is_default = (self.settings.provider == p_id)
                 model = (
-                    self.settings.gemini_model if p_id == PROVIDER_GEMINI
+                    self.settings.ollama_model if p_id == PROVIDER_OLLAMA
+                    else self.settings.gemini_model if p_id == PROVIDER_GEMINI
                     else self.settings.openai_model if p_id == PROVIDER_OPENAI
                     else provider.default_model
                 )
 
                 if pref:
                     if pref.get("is_default") and not is_default:
-                        # Database recorded this as default
                         pass
                 else:
                     self.db.set_provider_preference(
@@ -112,7 +121,9 @@ class AIProviderManager:
         target_name = (name or self.settings.provider).strip().lower()
 
         # Map common aliases
-        if target_name in ("chatgpt", "gpt", "openai"):
+        if target_name in ("ollama", "gemma", "gemma4", "local_ai"):
+            target_name = PROVIDER_OLLAMA
+        elif target_name in ("chatgpt", "gpt", "openai"):
             target_name = PROVIDER_OPENAI
         elif target_name in ("gemini", "google", "bard"):
             target_name = PROVIDER_GEMINI
@@ -123,7 +134,7 @@ class AIProviderManager:
             return self._providers[target_name]
 
         logger.warning(f"Provider '{target_name}' not found, falling back to default '{self.settings.provider}'")
-        return self._providers.get(self.settings.provider, self._providers[PROVIDER_MOCK])
+        return self._providers.get(self.settings.provider, self._providers[PROVIDER_OLLAMA])
 
     def get_active_provider(self) -> AIProvider:
         """Get the currently configured default provider."""
@@ -142,13 +153,26 @@ class AIProviderManager:
             else ""
         )
         selected_model = (
-            self.settings.gemini_model if p.provider_name == PROVIDER_GEMINI
+            self.settings.ollama_model if p.provider_name == PROVIDER_OLLAMA
+            else self.settings.gemini_model if p.provider_name == PROVIDER_GEMINI
             else self.settings.openai_model if p.provider_name == PROVIDER_OPENAI
             else p.default_model
         )
 
         status = "ready" if p.is_configured else "not_configured"
-        if p.provider_name == PROVIDER_MOCK:
+        if p.provider_name == PROVIDER_OLLAMA:
+            installed, _ = p.is_ollama_installed()  # type: ignore
+            running, _ = p.is_service_running()  # type: ignore
+            has_model = p.is_model_downloaded()  # type: ignore
+            if not installed:
+                status = "not_installed"
+            elif not running:
+                status = "service_offline"
+            elif not has_model:
+                status = "model_missing"
+            else:
+                status = "ready"
+        elif p.provider_name == PROVIDER_MOCK:
             status = "offline_mock"
 
         return ProviderInfo(
@@ -159,14 +183,14 @@ class AIProviderManager:
             selected_model=selected_model,
             available_models=p.available_models,
             status=status,
-            masked_key=mask_key(key),
+            masked_key="Offline / Free" if p.provider_name in (PROVIDER_OLLAMA, PROVIDER_MOCK) else mask_key(key),
             configuration_help=p.get_configuration_help(),
         )
 
     def get_all_providers_info(self) -> List[ProviderInfo]:
         """Return rich metadata for all registered providers."""
         infos = []
-        for p_id in [PROVIDER_GEMINI, PROVIDER_OPENAI, PROVIDER_MOCK]:
+        for p_id in AVAILABLE_PROVIDERS:
             info = self.get_provider_info(p_id)
             if info:
                 infos.append(info)
@@ -175,7 +199,9 @@ class AIProviderManager:
     def switch_default_provider(self, provider_name: str) -> Tuple[bool, str]:
         """Switch the default AI provider at runtime without restarting BOLT."""
         norm = provider_name.strip().lower()
-        if norm in ("chatgpt", "gpt"):
+        if norm in ("ollama", "gemma", "gemma4"):
+            norm = PROVIDER_OLLAMA
+        elif norm in ("chatgpt", "gpt"):
             norm = PROVIDER_OPENAI
         elif norm in ("gemini", "google"):
             norm = PROVIDER_GEMINI
@@ -201,7 +227,9 @@ class AIProviderManager:
     def set_provider_model(self, provider_name: str, model_name: str) -> Tuple[bool, str]:
         """Update the selected model for a specific provider."""
         norm = provider_name.strip().lower()
-        if norm in ("chatgpt", "gpt"):
+        if norm in ("ollama", "gemma"):
+            norm = PROVIDER_OLLAMA
+        elif norm in ("chatgpt", "gpt"):
             norm = PROVIDER_OPENAI
         elif norm in ("gemini", "google"):
             norm = PROVIDER_GEMINI
@@ -210,7 +238,16 @@ class AIProviderManager:
         if not clean_model:
             return False, "Model name cannot be empty."
 
-        if norm == PROVIDER_GEMINI:
+        if norm == PROVIDER_OLLAMA:
+            self.settings.ollama_model = clean_model
+            self.settings.save()
+            self._providers[PROVIDER_OLLAMA] = OllamaProvider(
+                base_url=self.settings.ollama_base_url,
+                model=clean_model,
+                context_size=self.settings.ollama_context_size,
+                cpu_threads=self.settings.ollama_cpu_threads,
+            )
+        elif norm == PROVIDER_GEMINI:
             self.settings.gemini_model = clean_model
             self.settings.save()
             self._providers[PROVIDER_GEMINI] = GeminiProvider(
@@ -225,60 +262,63 @@ class AIProviderManager:
                 model=clean_model,
                 base_url=self.settings.openai_base_url,
             )
-        else:
-            return False, f"Provider '{provider_name}' does not support custom model selection."
 
+        # Update in database
         try:
-            self.db.set_provider_preference(
+            self.db.set_provider_preference(provider=norm, model=clean_model)
+        except Exception:
+            pass
+
+        return True, f"Model for {norm.title()} set to `{clean_model}`."
+
+    def test_provider(self, provider_name: str) -> Tuple[bool, str, int]:
+        """Test connectivity and measure response latency in milliseconds."""
+        import time
+
+        norm = provider_name.strip().lower()
+        if norm in ("ollama", "gemma"):
+            norm = PROVIDER_OLLAMA
+        elif norm in ("chatgpt", "gpt"):
+            norm = PROVIDER_OPENAI
+        elif norm in ("gemini", "google"):
+            norm = PROVIDER_GEMINI
+        elif norm in ("mock", "local", "offline"):
+            norm = PROVIDER_MOCK
+
+        provider = self._providers.get(norm)
+        if not provider:
+            return False, f"Provider '{provider_name}' is not registered.", 0
+
+        start_t = time.time()
+        is_healthy, message = provider.test_connection()
+        latency_ms = int((time.time() - start_t) * 1000)
+
+        # Log test in SQLite
+        status_label = "success" if is_healthy else "failed"
+        try:
+            self.db.log_ai_connection_test(
                 provider=norm,
-                model=clean_model,
-                is_default=(self.settings.provider == norm),
+                status=status_label,
+                latency_ms=latency_ms,
+                message=message,
             )
         except Exception as e:
-            logger.warning(f"Error persisting provider model preference: {e}")
+            logger.debug(f"Could not log AI connection test: {e}")
 
-        return True, f"Updated model for {norm.title()} to `{clean_model}`."
-
-    def test_provider(self, provider_name: str) -> Tuple[bool, str]:
-        """Run connectivity and auth verification test for a provider."""
-        p = self.get_provider(provider_name)
-        ok, msg = p.test_connection()
-
-        # Record connection test log in database
-        try:
-            status_str = "SUCCESS" if ok else "FAILED"
-            self.db.log_connection_test(
-                provider=p.provider_name,
-                status=status_str,
-                latency_ms=0,
-                message=msg,
-            )
-            self.db.set_provider_preference(
-                provider=p.provider_name,
-                model=p.default_model,
-                is_available=ok,
-                last_status=status_str,
-            )
-        except Exception as e:
-            logger.warning(f"Error recording connection test log: {e}")
-
-        return ok, msg
-
-    def test_all_providers(self) -> Dict[str, Tuple[bool, str]]:
-        """Run connectivity check across all registered providers."""
-        results: Dict[str, Tuple[bool, str]] = {}
-        for p_id in [PROVIDER_GEMINI, PROVIDER_OPENAI, PROVIDER_MOCK]:
-            results[p_id] = self.test_provider(p_id)
-        return results
+        return is_healthy, message, latency_ms
 
 
 _PROVIDER_MGR_INSTANCE: Optional[AIProviderManager] = None
 
 
-def get_provider_manager() -> AIProviderManager:
-    """Singleton getter for the AI Provider Manager."""
+def get_ai_provider_manager() -> AIProviderManager:
+    """Singleton getter for AIProviderManager."""
     global _PROVIDER_MGR_INSTANCE
     if _PROVIDER_MGR_INSTANCE is None:
         _PROVIDER_MGR_INSTANCE = AIProviderManager()
     return _PROVIDER_MGR_INSTANCE
+
+
+# Alias for backward compatibility
+get_provider_manager = get_ai_provider_manager
 

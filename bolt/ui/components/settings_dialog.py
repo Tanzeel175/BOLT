@@ -1,4 +1,4 @@
-"""Settings Dialog for configuring AI providers, API keys, models, and parameters."""
+"""Settings Dialog for configuring AI providers, Ollama, API keys, models, and parameters."""
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
@@ -19,13 +19,16 @@ from PySide6.QtWidgets import (
 )
 
 from bolt.ai.gemini_provider import GeminiProvider
+from bolt.ai.ollama_provider import OllamaProvider
 from bolt.ai.openai_provider import OpenAIProvider
 from bolt.config.constants import (
-    PROVIDER_GEMINI,
-    PROVIDER_OPENAI,
-    PROVIDER_MOCK,
     DEFAULT_GEMINI_MODEL,
+    DEFAULT_OLLAMA_MODEL,
     DEFAULT_OPENAI_MODEL,
+    PROVIDER_GEMINI,
+    PROVIDER_MOCK,
+    PROVIDER_OLLAMA,
+    PROVIDER_OPENAI,
 )
 from bolt.config.settings import Settings, get_settings
 from bolt.core.logger import get_logger
@@ -45,27 +48,32 @@ class ConnectionTestWorker(QThread):
 
     def run(self):
         try:
-            if self.provider == PROVIDER_GEMINI:
+            if self.provider == PROVIDER_OLLAMA:
+                p = OllamaProvider(base_url=self.base_url, model=self.model)
+                ok, msg = p.test_connection()
+                self.finished.emit(ok, msg)
+
+            elif self.provider == PROVIDER_GEMINI:
                 if not self.api_key.strip():
-                    self.finished.emit(False, "API Key is empty.")
+                    self.finished.emit(False, "Gemini API Key is empty.")
                     return
                 p = GeminiProvider(api_key=self.api_key, model=self.model)
-                ok = p.test_connection()
+                ok, msg = p.test_connection()
                 if ok:
                     self.finished.emit(True, "Successfully connected to Google Gemini API!")
                 else:
-                    self.finished.emit(False, "Connection failed. Please check your Gemini API key.")
+                    self.finished.emit(False, f"Connection failed: {msg}")
 
             elif self.provider == PROVIDER_OPENAI:
                 if not self.api_key.strip() and "localhost" not in self.base_url:
-                    self.finished.emit(False, "API Key is empty.")
+                    self.finished.emit(False, "OpenAI API Key is empty.")
                     return
                 p = OpenAIProvider(api_key=self.api_key, model=self.model, base_url=self.base_url)
-                ok = p.test_connection()
+                ok, msg = p.test_connection()
                 if ok:
                     self.finished.emit(True, "Successfully connected to OpenAI API!")
                 else:
-                    self.finished.emit(False, "Connection failed. Please check your OpenAI API key or Base URL.")
+                    self.finished.emit(False, f"Connection failed: {msg}")
 
             else:
                 self.finished.emit(True, "Mock/Local provider is always connected.")
@@ -79,7 +87,7 @@ class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("BOLT – Settings & Configuration")
-        self.setFixedSize(560, 680)
+        self.setFixedSize(580, 720)
         self.setModal(True)
         self.settings = get_settings()
         self.test_worker = None
@@ -89,34 +97,61 @@ class SettingsDialog(QDialog):
     def _init_ui(self):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(20, 20, 20, 20)
-        main_layout.setSpacing(14)
+        main_layout.setSpacing(12)
 
         title_label = QLabel("⚙ Assistant Configuration")
         title_label.setStyleSheet("font-size: 16px; font-weight: 700; color: #58a6ff;")
         main_layout.addWidget(title_label)
 
         # --- Section 1: AI Provider Selection ---
-        provider_group = QGroupBox("Active AI Provider")
+        provider_group = QGroupBox("Active AI Provider (Offline-First Architecture)")
         provider_group.setStyleSheet("QGroupBox { font-weight: 600; color: #c9d1d9; }")
         provider_layout = QFormLayout(provider_group)
         provider_layout.setSpacing(10)
 
         self.provider_combo = QComboBox()
-        self.provider_combo.addItem("Google Gemini (Recommended)", PROVIDER_GEMINI)
-        self.provider_combo.addItem("OpenAI / Compatible (Groq, OpenRouter, Ollama)", PROVIDER_OPENAI)
-        self.provider_combo.addItem("Local / Mock Mode (Offline)", PROVIDER_MOCK)
+        self.provider_combo.addItem("🦙 Ollama Local AI (Default Brain - Zero Internet)", PROVIDER_OLLAMA)
+        self.provider_combo.addItem("Google Gemini (Online Cloud API)", PROVIDER_GEMINI)
+        self.provider_combo.addItem("OpenAI ChatGPT (Online Cloud API)", PROVIDER_OPENAI)
+        self.provider_combo.addItem("Mock / Test Mode (Offline Diagnostic)", PROVIDER_MOCK)
         self.provider_combo.currentIndexChanged.connect(self._on_provider_changed)
-        provider_layout.addRow("Provider:", self.provider_combo)
+        provider_layout.addRow("Default Brain:", self.provider_combo)
         main_layout.addWidget(provider_group)
 
-        # --- Section 2: Google Gemini Config ---
-        self.gemini_group = QGroupBox("Google Gemini Settings")
+        # --- Section 2: Ollama Local AI Settings ---
+        self.ollama_group = QGroupBox("🦙 Ollama Local Model Settings")
+        self.ollama_group.setStyleSheet("QGroupBox { font-weight: 600; color: #c9d1d9; }")
+        ollama_layout = QFormLayout(self.ollama_group)
+
+        self.ollama_model_combo = QComboBox()
+        self.ollama_model_combo.setEditable(True)
+        self.ollama_model_combo.addItems([
+            "gemma4:e2b",
+            "gemma4:e4b",
+            "gemma2:2b",
+            "qwen2.5:3b",
+            "llama3.2:3b",
+        ])
+        ollama_layout.addRow("Local Model:", self.ollama_model_combo)
+
+        self.ollama_url_edit = QLineEdit()
+        self.ollama_url_edit.setPlaceholderText("http://127.0.0.1:11434")
+        ollama_layout.addRow("Service URL:", self.ollama_url_edit)
+
+        self.ollama_threads_spin = QSpinBox()
+        self.ollama_threads_spin.setRange(1, 16)
+        self.ollama_threads_spin.setValue(4)
+        ollama_layout.addRow("CPU Threads:", self.ollama_threads_spin)
+        main_layout.addWidget(self.ollama_group)
+
+        # --- Section 3: Google Gemini Config ---
+        self.gemini_group = QGroupBox("Google Gemini Settings (Optional Cloud)")
         self.gemini_group.setStyleSheet("QGroupBox { font-weight: 600; color: #c9d1d9; }")
         gemini_layout = QFormLayout(self.gemini_group)
 
         self.gemini_key_edit = QLineEdit()
         self.gemini_key_edit.setEchoMode(QLineEdit.Password)
-        self.gemini_key_edit.setPlaceholderText("Enter AI Studio Gemini API Key...")
+        self.gemini_key_edit.setPlaceholderText("Enter Gemini API Key...")
         gemini_layout.addRow("API Key:", self.gemini_key_edit)
 
         self.gemini_model_combo = QComboBox()
@@ -125,13 +160,12 @@ class SettingsDialog(QDialog):
             "gemini-2.5-flash",
             "gemini-2.5-pro",
             "gemini-1.5-flash",
-            "gemini-1.5-pro",
         ])
         gemini_layout.addRow("Model:", self.gemini_model_combo)
         main_layout.addWidget(self.gemini_group)
 
-        # --- Section 3: OpenAI Config ---
-        self.openai_group = QGroupBox("OpenAI / Compatible Provider Settings")
+        # --- Section 4: OpenAI Config ---
+        self.openai_group = QGroupBox("OpenAI Settings (Optional Cloud)")
         self.openai_group.setStyleSheet("QGroupBox { font-weight: 600; color: #c9d1d9; }")
         openai_layout = QFormLayout(self.openai_group)
 
@@ -146,8 +180,6 @@ class SettingsDialog(QDialog):
             "gpt-4o-mini",
             "gpt-4o",
             "o3-mini",
-            "llama-3.3-70b-versatile",
-            "deepseek-r1-distill-llama-70b",
         ])
         openai_layout.addRow("Model:", self.openai_model_combo)
 
@@ -156,7 +188,7 @@ class SettingsDialog(QDialog):
         openai_layout.addRow("Base URL:", self.openai_base_url_edit)
         main_layout.addWidget(self.openai_group)
 
-        # --- Section 4: Model Parameters ---
+        # --- Section 5: Model Parameters ---
         params_group = QGroupBox("Inference Parameters")
         params_group.setStyleSheet("QGroupBox { font-weight: 600; color: #c9d1d9; }")
         params_layout = QFormLayout(params_group)
@@ -174,12 +206,13 @@ class SettingsDialog(QDialog):
         params_layout.addRow("Max Tokens:", self.tokens_spin)
 
         self.system_prompt_edit = QTextEdit()
-        self.system_prompt_edit.setFixedHeight(75)
+        self.system_prompt_edit.setFixedHeight(65)
         params_layout.addRow("System Prompt:", self.system_prompt_edit)
         main_layout.addWidget(params_group)
 
         # --- Connection Test Status Label ---
         self.test_status_label = QLabel("")
+        self.test_status_label.setWordWrap(True)
         self.test_status_label.setStyleSheet("font-size: 11px; padding: 2px;")
         main_layout.addWidget(self.test_status_label)
 
@@ -210,6 +243,10 @@ class SettingsDialog(QDialog):
         if idx >= 0:
             self.provider_combo.setCurrentIndex(idx)
 
+        self.ollama_model_combo.setCurrentText(self.settings.ollama_model)
+        self.ollama_url_edit.setText(self.settings.ollama_base_url)
+        self.ollama_threads_spin.setValue(self.settings.ollama_cpu_threads)
+
         self.gemini_key_edit.setText(self.settings.gemini_api_key)
         self.gemini_model_combo.setCurrentText(self.settings.gemini_model)
 
@@ -225,14 +262,25 @@ class SettingsDialog(QDialog):
 
     def _on_provider_changed(self):
         provider = self.provider_combo.currentData()
+        self.ollama_group.setEnabled(provider == PROVIDER_OLLAMA)
         self.gemini_group.setEnabled(provider == PROVIDER_GEMINI)
         self.openai_group.setEnabled(provider == PROVIDER_OPENAI)
 
     def _test_connection(self):
         provider = self.provider_combo.currentData()
-        api_key = self.gemini_key_edit.text() if provider == PROVIDER_GEMINI else self.openai_key_edit.text()
-        model = self.gemini_model_combo.currentText() if provider == PROVIDER_GEMINI else self.openai_model_combo.currentText()
-        base_url = self.openai_base_url_edit.text()
+        api_key = (
+            self.gemini_key_edit.text() if provider == PROVIDER_GEMINI
+            else self.openai_key_edit.text()
+        )
+        model = (
+            self.ollama_model_combo.currentText() if provider == PROVIDER_OLLAMA
+            else self.gemini_model_combo.currentText() if provider == PROVIDER_GEMINI
+            else self.openai_model_combo.currentText()
+        )
+        base_url = (
+            self.ollama_url_edit.text() if provider == PROVIDER_OLLAMA
+            else self.openai_base_url_edit.text()
+        )
 
         self.test_status_label.setText("Testing connection...")
         self.test_status_label.setStyleSheet("color: #d29922; font-size: 11px;")
@@ -254,11 +302,17 @@ class SettingsDialog(QDialog):
     def _save_settings(self):
         """Save settings to .env and notify parent."""
         self.settings.provider = self.provider_combo.currentData()
+        self.settings.ollama_model = self.ollama_model_combo.currentText().strip() or DEFAULT_OLLAMA_MODEL
+        self.settings.ollama_base_url = self.ollama_url_edit.text().strip() or "http://127.0.0.1:11434"
+        self.settings.ollama_cpu_threads = int(self.ollama_threads_spin.value())
+
         self.settings.gemini_api_key = self.gemini_key_edit.text().strip()
         self.settings.gemini_model = self.gemini_model_combo.currentText().strip() or DEFAULT_GEMINI_MODEL
+
         self.settings.openai_api_key = self.openai_key_edit.text().strip()
         self.settings.openai_model = self.openai_model_combo.currentText().strip() or DEFAULT_OPENAI_MODEL
         self.settings.openai_base_url = self.openai_base_url_edit.text().strip() or "https://api.openai.com/v1"
+
         self.settings.temperature = round(self.temp_spin.value(), 2)
         self.settings.max_tokens = int(self.tokens_spin.value())
         self.settings.system_prompt = self.system_prompt_edit.toPlainText().strip()
@@ -271,4 +325,3 @@ class SettingsDialog(QDialog):
         except Exception as e:
             logger.exception("Failed to save settings.")
             QMessageBox.critical(self, "Error Saving Settings", f"Could not save configuration: {e}")
-

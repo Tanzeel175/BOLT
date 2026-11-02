@@ -136,6 +136,110 @@ class FileManager:
 
         return results
 
+    @staticmethod
+    def create_text_file(
+        file_path_or_name: str,
+        content: str = "",
+        folder_alias: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a new text file at the specified location or within a resolved folder.
+        Default location is user Desktop if only a filename is passed.
+        """
+        clean_path = file_path_or_name.strip().strip("'\"")
+        p = pathlib.Path(clean_path)
+
+        # If it's just a file name (no directory separators), put on Desktop or specified alias
+        if not p.is_absolute() and len(p.parts) == 1:
+            target_folder = FileManager.resolve_folder_alias(folder_alias or "desktop") or pathlib.Path.home()
+            target_path = target_folder / clean_path
+        else:
+            target_path = p.expanduser().resolve()
+
+        try:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text(content, encoding="utf-8")
+            logger.info(f"Created text file at: {target_path}")
+            return {
+                "success": True,
+                "file_path": str(target_path),
+                "file_name": target_path.name,
+                "bytes_written": len(content.encode("utf-8")),
+                "message": f"Successfully created file `{target_path.name}` at `{target_path.parent}`.",
+            }
+        except Exception as e:
+            logger.error(f"Failed to create text file '{file_path_or_name}': {e}")
+            return {
+                "success": False,
+                "error": f"Failed to create file: {e}",
+                "file_path": str(target_path),
+            }
+
+    @staticmethod
+    def read_text_file(file_path: str) -> Dict[str, Any]:
+        """Read and return content of a text file."""
+        clean_path = file_path.strip().strip("'\"")
+        p = pathlib.Path(clean_path)
+        if not p.is_absolute() and len(p.parts) == 1:
+            desktop = FileManager.resolve_folder_alias("desktop")
+            if desktop and (desktop / clean_path).exists():
+                p = desktop / clean_path
+            else:
+                p = p.expanduser().resolve()
+        else:
+            p = p.expanduser().resolve()
+
+        if not p.exists():
+            return {"success": False, "error": f"File does not exist: {p}"}
+
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+            return {
+                "success": True,
+                "file_path": str(p),
+                "file_name": p.name,
+                "content": text,
+                "size_chars": len(text),
+                "message": f"Read {len(text)} characters from `{p.name}`.",
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Failed reading file: {e}"}
+
+    @staticmethod
+    def write_text_file(file_path: str, content: str, allow_overwrite: bool = True) -> Dict[str, Any]:
+        """Write content to text file, with optional overwrite protection."""
+        clean_path = file_path.strip().strip("'\"")
+        p = pathlib.Path(clean_path)
+        if not p.is_absolute() and len(p.parts) == 1:
+            desktop = FileManager.resolve_folder_alias("desktop")
+            if desktop:
+                p = desktop / clean_path
+            else:
+                p = p.expanduser().resolve()
+        else:
+            p = p.expanduser().resolve()
+
+        if p.exists() and not allow_overwrite:
+            stem = p.stem
+            ext = p.suffix
+            counter = 1
+            while (p.parent / f"{stem}_{counter}{ext}").exists():
+                counter += 1
+            p = p.parent / f"{stem}_{counter}{ext}"
+
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8")
+            return {
+                "success": True,
+                "file_path": str(p),
+                "file_name": p.name,
+                "bytes_written": len(content.encode("utf-8")),
+                "message": f"Successfully written to `{p.name}`.",
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Failed writing file: {e}"}
+
 
 _FILE_MGR_INSTANCE: Optional[FileManager] = None
 

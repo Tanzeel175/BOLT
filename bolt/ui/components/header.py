@@ -44,9 +44,9 @@ class HeaderBar(QFrame):
         layout.addStretch()
 
         # Model Badge Pill
-        self.model_badge = QLabel("● Provider: Gemini")
+        self.model_badge = QLabel("● Provider: Ollama")
         self.model_badge.setStyleSheet(
-            "background-color: #21262d; color: #7ee787; border: 1px solid #30363d; "
+            "background-color: #21262d; color: #58a6ff; border: 1px solid #30363d; "
             "border-radius: 12px; padding: 4px 12px; font-size: 11px; font-weight: 600;"
         )
         layout.addWidget(self.model_badge)
@@ -64,11 +64,19 @@ class HeaderBar(QFrame):
 
     def update_model_badge(self, provider_name: str, model_name: str):
         """Update the model status pill with current provider and model."""
-        display_text = f"● {provider_name.upper()}: {model_name}"
-        color = "#7ee787" if provider_name != "mock" else "#e3b341"
+        p_upper = provider_name.upper()
+        if provider_name == "ollama":
+            display_text = f"● LOCAL AI: {model_name}"
+            color = "#58a6ff"
+        elif provider_name == "mock":
+            display_text = f"● OFFLINE MOCK: {model_name}"
+            color = "#e3b341"
+        else:
+            display_text = f"● {p_upper}: {model_name}"
+            color = "#7ee787"
+
         self.model_badge.setText(display_text)
         self.model_badge.setStyleSheet(
             f"background-color: #21262d; color: {color}; border: 1px solid #30363d; "
             f"border-radius: 12px; padding: 4px 12px; font-size: 11px; font-weight: 600;"
         )
-

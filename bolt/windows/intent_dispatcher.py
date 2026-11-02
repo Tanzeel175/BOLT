@@ -75,17 +75,19 @@ class WindowsIntentDispatcher:
         # Exclusions for Phase 3/4 single commands
         if lower.startswith("compare ") and any(p in lower for p in ["gemini", "chatgpt", "openai"]):
             return False
+        # Multi-tab single intent exclusion: e.g. "open google and github in separate tabs"
         if "in separate tabs" in lower or "in tabs" in lower:
             return False
-        if re.match(r"^(?:open\s+)?[a-zA-Z0-9\s\-]+?\s+and\s+search\s+", lower):
+
+        # Single site search exclusion: e.g. "open youtube and search for ..."
+        if re.match(r"^(?:open\s+)?(youtube|google|bing|duckduckgo)\s+and\s+search\s+", lower):
             return False
 
         # 6. Compound actions: multiple verbs + conjunctions
-        action_verbs = ["open", "search", "summarize", "save", "find", "ask", "run", "explain", "launch", "write", "compare"]
-        conjunctions = [", and ", " and then ", ", then ", " and summarize ", " and save ", " and explain ", " and show "]
-
-        verb_count = sum(1 for v in action_verbs if f" {v} " in f" {lower} ")
-        has_conjunction = any(c in lower for c in conjunctions) or ("," in lower and " and " in lower)
+        action_verbs = ["open", "search", "summarize", "save", "find", "ask", "run", "explain", "launch", "write", "type", "create", "compare"]
+        padded = f" {lower} "
+        verb_count = sum(1 for v in action_verbs if f" {v} " in padded)
+        has_conjunction = any(c in lower for c in [" and ", ", and ", " and then ", ", then ", " and summarize ", " and save ", " and write ", " and create "]) or ("," in lower and " and " in lower)
         if verb_count >= 2 and has_conjunction:
             return True
 
@@ -282,7 +284,7 @@ class WindowsIntentDispatcher:
             return IntentResult(
                 is_windows_action=True,
                 action_type="multi_action_task",
-                success=plan.is_completed() or plan.status == TaskStatus.WAITING_APPROVAL,
+                success=plan.is_completed() or plan.status in (TaskStatus.WAITING_APPROVAL, TaskStatus.PARTIALLY_COMPLETED),
                 title=plan.title,
                 content=summary_md,
                 raw_data={"plan": plan.to_dict(), "plan_id": plan.plan_id, "status": plan.status.value},

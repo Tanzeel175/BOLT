@@ -320,7 +320,7 @@ class TaskPlanner:
 
         for clause in clauses:
             step_id = f"step_{step_counter}"
-            deps = [prev_step_id] if prev_step_id else []
+            deps: List[str] = []
 
             # 1. Search action
             if "search" in clause or "find" in clause:
@@ -348,6 +348,7 @@ class TaskPlanner:
 
             # 2. Summarize / Explain action
             elif "summarize" in clause or "explain" in clause:
+                deps = [prev_step_id] if prev_step_id else []
                 prompt = f"Please explain or summarize according to instruction: {clause}"
                 if prev_step_id:
                     prompt = f"Summarize or explain the results from previous step: ${{{prev_step_id}.result}}"
@@ -361,24 +362,64 @@ class TaskPlanner:
                     active_application="AI Provider",
                 ))
 
-            # 3. Save / Write file action
-            elif "save" in clause or "write" in clause:
-                target_file = "bolt_output.txt"
-                file_match = re.search(r"(?:in|to)\s+(?:a\s+)?([a-zA-Z0-9_\-\.]+\.txt)", clause)
+            # 3. Create file action (e.g. "create a file called Notes.txt on my Desktop")
+            elif "create" in clause and any(w in clause for w in ["file", ".txt", "notes"]):
+                filename = "Notes.txt"
+                file_match = re.search(r"(?:called|named)?\s*([a-zA-Z0-9_\-\.]+\.txt)", clause, re.IGNORECASE)
                 if file_match:
-                    target_file = file_match.group(1)
-                content_ref = f"${{{prev_step_id}.content}}" if prev_step_id else "BOLT Task Output"
+                    filename = file_match.group(1)
+
+                init_content = ""
+                content_match = re.search(r"(?:with\s+content|saying|text)\s*[:\"']?([^\"']+)[\"']?", clause, re.IGNORECASE)
+                if content_match:
+                    init_content = content_match.group(1).strip()
+
                 steps.append(TaskStep(
                     step_id=step_id,
-                    description=f"Save result to {target_file}",
-                    tool_name="write_text_file",
-                    input_params={"file_path": target_file, "content": content_ref, "allow_overwrite": False},
-                    expected_output=f"File saved to {target_file}",
-                    dependencies=deps,
+                    description=f"Create file {filename} on Desktop",
+                    tool_name="create_text_file",
+                    input_params={"file_path": filename, "content": init_content},
+                    expected_output=f"File {filename} created on Desktop",
+                    dependencies=[],
                     active_application="File Manager",
                 ))
 
-            # 4. Open app or site action
+            # 4. Write / Type action (Typing into open app vs saving to file)
+            elif "write" in clause or "type" in clause or "save" in clause:
+                is_file_save = any(w in clause for w in [".txt", "to file", "in a file", "in file", "to disk"])
+                if is_file_save:
+                    target_file = "bolt_output.txt"
+                    file_match = re.search(r"(?:in|to)\s+(?:a\s+)?([a-zA-Z0-9_\-\.]+\.txt)", clause)
+                    if file_match:
+                        target_file = file_match.group(1)
+                    content_ref = f"${{{prev_step_id}.content}}" if prev_step_id else "BOLT Task Output"
+                    deps = [prev_step_id] if prev_step_id else []
+                    steps.append(TaskStep(
+                        step_id=step_id,
+                        description=f"Save result to {target_file}",
+                        tool_name="write_text_file",
+                        input_params={"file_path": target_file, "content": content_ref, "allow_overwrite": False},
+                        expected_output=f"File saved to {target_file}",
+                        dependencies=deps,
+                        active_application="File Manager",
+                    ))
+                else:
+                    # Typing text into active application (e.g. "write Hello World")
+                    text_to_type = re.sub(r"^(?:write|type)\s+", "", clause, flags=re.IGNORECASE).strip().strip("'\"")
+                    if not text_to_type:
+                        text_to_type = "Hello World"
+                    deps = [prev_step_id] if prev_step_id else []
+                    steps.append(TaskStep(
+                        step_id=step_id,
+                        description=f"Type text into active application: \"{text_to_type}\"",
+                        tool_name="type_text",
+                        input_params={"text": f"{text_to_type}\n", "delay_ms": 15},
+                        expected_output=f"Typed \"{text_to_type}\" into window",
+                        dependencies=deps,
+                        active_application="Active Application",
+                    ))
+
+            # 5. Open app or site action
             elif "open" in clause or "launch" in clause:
                 target = re.sub(r"^(?:open|launch|start|run)\s+", "", clause).strip()
                 if any(b in target for b in ["chrome", "edge", "firefox", "browser", "chatgpt", "gemini", "google", "gmail", "youtube"]) or target.startswith("http"):
@@ -402,8 +443,9 @@ class TaskPlanner:
                         active_application=target.title(),
                     ))
 
-            # 5. Fallback generic clause
+            # 6. Fallback generic clause
             else:
+                deps = [prev_step_id] if prev_step_id else []
                 steps.append(TaskStep(
                     step_id=step_id,
                     description=clause.title(),

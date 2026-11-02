@@ -81,6 +81,7 @@ class MultitaskingManager:
         """Format an execution report in clean GitHub-style Markdown."""
         status_icons = {
             TaskStatus.COMPLETED: "✅",
+            TaskStatus.PARTIALLY_COMPLETED: "⚠️",
             TaskStatus.FAILED: "❌",
             TaskStatus.CANCELLED: "⏹️",
             TaskStatus.WAITING_APPROVAL: "⏳",

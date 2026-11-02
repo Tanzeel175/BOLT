@@ -416,6 +416,7 @@ class MainWindow(QMainWindow):
         self.settings = get_settings(reload=True)
         self.ai_router = get_ai_router()
         self._sync_header_badge()
+        self.status_bar.refresh_telemetry()
         self.status_bar.set_ready("Settings updated successfully")
         logger.info("Settings reloaded and synced across UI.")
 

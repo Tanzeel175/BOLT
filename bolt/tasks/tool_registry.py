@@ -21,6 +21,8 @@ from bolt.windows.system_info import SystemInfo
 from bolt.ai.router import get_ai_router
 from bolt.ai.base import ChatMessage
 from bolt.ai.multi_ai import get_multi_ai_comparator
+from bolt.windows.input_controller import InputController
+from bolt.core.network_manager import get_network_manager
 
 logger = get_logger("ToolRegistry")
 
@@ -270,6 +272,40 @@ class ToolRegistry:
             handler=lambda: SystemInfo.get_system_summary(),
         )
 
+        self.register_tool(
+            name="get_system_information",
+            description="Retrieve detailed hardware and OS information (CPU, RAM, GPU, Storage, OS).",
+            parameters={"type": "object", "properties": {}},
+            handler=lambda: SystemInfo.get_system_summary(),
+        )
+
+        self.register_tool(
+            name="switch_application",
+            description="Switch focus to an open desktop application or window by name.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "app_name": {
+                        "type": "string",
+                        "description": "Name or title of application to switch focus to.",
+                    },
+                },
+                "required": ["app_name"],
+            },
+            handler=lambda app_name: app_ctrl.switch_application(app_name),
+        )
+
+        self.register_tool(
+            name="check_internet_connection",
+            description="Check real-time internet connectivity status and reachability.",
+            parameters={"type": "object", "properties": {}},
+            handler=lambda: {
+                "success": True,
+                "is_connected": get_network_manager().is_internet_available(),
+                "status": "online" if get_network_manager().is_internet_available() else "offline",
+            },
+        )
+
         # =====================================================================
         # 3. FILE SYSTEM & STORAGE TOOLS
         # =====================================================================
@@ -355,6 +391,42 @@ class ToolRegistry:
         )
 
         self.register_tool(
+            name="open_file",
+            description="Open a file using its Windows default application association.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path or filename to open.",
+                    },
+                },
+                "required": ["file_path"],
+            },
+            handler=lambda file_path: FileManager.open_item(file_path),
+        )
+
+        self.register_tool(
+            name="create_text_file",
+            description="Create a new text file on Desktop or specified path.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Destination file path or filename.",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Optional initial text content for the file.",
+                    },
+                },
+                "required": ["file_path"],
+            },
+            handler=lambda file_path, content="": FileManager.create_text_file(file_path, content=content),
+        )
+
+        self.register_tool(
             name="verify_file_exists",
             description="Verify if a file or directory exists on the system.",
             parameters={
@@ -373,6 +445,76 @@ class ToolRegistry:
                 "is_file": Path(file_path).is_file() if Path(file_path).exists() else False,
                 "size_bytes": Path(file_path).stat().st_size if Path(file_path).exists() else 0,
             },
+        )
+
+        # =====================================================================
+        # 3B. WINDOWS INPUT SIMULATION & AUTOMATION TOOLS
+        # =====================================================================
+        self.register_tool(
+            name="type_text",
+            description="Type text into the currently active or focused application window.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to type into the active window.",
+                    },
+                    "delay_ms": {
+                        "type": "integer",
+                        "description": "Delay between keystrokes in milliseconds (default: 15).",
+                    },
+                },
+                "required": ["text"],
+            },
+            handler=lambda text, delay_ms=15: InputController.type_text(text, delay_ms=delay_ms),
+        )
+
+        self.register_tool(
+            name="press_key",
+            description="Press a keyboard key (e.g. 'enter', 'tab', 'esc', 'backspace').",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "Key name to press (e.g. 'enter', 'tab', 'esc').",
+                    },
+                },
+                "required": ["key"],
+            },
+            handler=lambda key: InputController.press_key(key),
+        )
+
+        self.register_tool(
+            name="hotkey",
+            description="Simulate a keyboard shortcut or combination (e.g. 'ctrl+s', 'win+r').",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "keys": {
+                        "type": "string",
+                        "description": "Hotkey string (e.g. 'ctrl+s', 'ctrl+c').",
+                    },
+                },
+                "required": ["keys"],
+            },
+            handler=lambda keys: InputController.send_hotkey(keys),
+        )
+
+        self.register_tool(
+            name="take_screenshot",
+            description="Capture a screenshot of the computer screen and save as PNG.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "output_path": {
+                        "type": "string",
+                        "description": "Optional destination PNG file path.",
+                    },
+                },
+            },
+            handler=lambda output_path="": InputController.take_screenshot(output_path=output_path or None),
         )
 
         # =====================================================================
@@ -506,6 +648,11 @@ class ToolRegistry:
     def _read_text_file_handler(self, file_path: str) -> Dict[str, Any]:
         """Read text from file, supporting PDF text extraction if pypdf/fitz is available or fallback."""
         p = Path(file_path).expanduser().resolve()
+        if not p.exists() and len(Path(file_path).parts) == 1:
+            desktop = FileManager.resolve_folder_alias("desktop")
+            if desktop and (desktop / file_path).exists():
+                p = desktop / file_path
+
         if not p.exists():
             return {"success": False, "error": f"File does not exist: {file_path}"}
 
@@ -534,7 +681,13 @@ class ToolRegistry:
         self, file_path: str, content: str, allow_overwrite: bool = False
     ) -> Dict[str, Any]:
         """Safely write text to file, preventing accidental overwrites."""
-        p = Path(file_path).expanduser().resolve()
+        raw_p = Path(file_path).expanduser()
+        if not raw_p.is_absolute() and len(raw_p.parts) == 1:
+            desktop = FileManager.resolve_folder_alias("desktop")
+            p = (desktop / file_path).resolve() if desktop else raw_p.resolve()
+        else:
+            p = raw_p.resolve()
+
         if p.exists() and not allow_overwrite:
             # Generate non-conflicting filename
             stem = p.stem

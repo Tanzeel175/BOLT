@@ -55,7 +55,7 @@ class TestPhase1(unittest.TestCase):
     def test_01_settings(self):
         settings = Settings.load()
         self.assertIsNotNone(settings)
-        self.assertIn(settings.provider, ["gemini", "openai", "mock"])
+        self.assertIn(settings.provider, ["ollama", "gemini", "openai", "mock"])
         masked = Settings.mask_key("AIzaSyD-1234567890abcdef")
         self.assertTrue(masked.startswith("AIza"))
         self.assertTrue(masked.endswith("cdef"))
