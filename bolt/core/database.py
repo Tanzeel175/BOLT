@@ -175,6 +175,36 @@ class Database:
                     """
                 )
 
+                # Workflows Memory table (Phase 5: Workflow Memory & Reuse)
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS workflows (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        user_query TEXT NOT NULL,
+                        plan_json TEXT NOT NULL DEFAULT '{}',
+                        steps_summary TEXT NOT NULL DEFAULT '',
+                        apps_used TEXT NOT NULL DEFAULT '[]',
+                        tools_used TEXT NOT NULL DEFAULT '[]',
+                        result_summary TEXT DEFAULT '',
+                        execution_count INTEGER NOT NULL DEFAULT 1,
+                        is_successful INTEGER NOT NULL DEFAULT 1,
+                        created_at TEXT NOT NULL,
+                        last_executed_at TEXT NOT NULL
+                    );
+                    """
+                )
+
+                # Migration: Ensure tasks table has Phase 5 columns
+                cursor.execute("PRAGMA table_info(tasks);")
+                task_cols = [col[1] for col in cursor.fetchall()]
+                if "title" not in task_cols:
+                    cursor.execute("ALTER TABLE tasks ADD COLUMN title TEXT DEFAULT 'Task';")
+                if "progress" not in task_cols:
+                    cursor.execute("ALTER TABLE tasks ADD COLUMN progress REAL DEFAULT 0.0;")
+                if "current_step_id" not in task_cols:
+                    cursor.execute("ALTER TABLE tasks ADD COLUMN current_step_id TEXT DEFAULT '';")
+
                 # Indexes for fast lookups
                 cursor.execute(
                     "CREATE INDEX IF NOT EXISTS idx_messages_conv_id ON messages(conversation_id, created_at);"
@@ -196,6 +226,12 @@ class Database:
                 )
                 cursor.execute(
                     "CREATE INDEX IF NOT EXISTS idx_ai_logs_provider ON ai_connection_logs(provider, tested_at DESC);"
+                )
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_workflows_name ON workflows(name);"
+                )
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, created_at DESC);"
                 )
 
                 # Seed initial verified websites (Section 3 of Phase 3 Requirements)
@@ -752,6 +788,236 @@ class Database:
                 (limit,),
             )
             return [dict(r) for r in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    # ---------------- Phase 5: Tasks & Execution History ----------------
+
+    def create_task_record(
+        self,
+        task_id: str,
+        conversation_id: Optional[str],
+        instruction: str,
+        title: str = "Task",
+        status: str = "PENDING",
+        plan_json: str = "{}",
+    ) -> str:
+        """Create a new task execution record in SQLite (idempotent upsert)."""
+        now = utc_now_iso()
+        conn = self._get_connection()
+        try:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO tasks (id, conversation_id, title, instruction, status, plan_json, result_json, progress, current_step_id, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, '{}', 0.0, '', ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        status = excluded.status,
+                        plan_json = excluded.plan_json
+                    """,
+                    (task_id, conversation_id, title, instruction, status, plan_json, now),
+                )
+            return task_id
+        finally:
+            conn.close()
+
+    def update_task_record(
+        self,
+        task_id: str,
+        status: Optional[str] = None,
+        progress: Optional[float] = None,
+        current_step_id: Optional[str] = None,
+        plan_json: Optional[str] = None,
+        result_json: Optional[str] = None,
+        completed_at: Optional[str] = None,
+    ) -> None:
+        """Update an existing task's execution state."""
+        conn = self._get_connection()
+        updates = []
+        params = []
+
+        if status is not None:
+            updates.append("status = ?")
+            params.append(status)
+        if progress is not None:
+            updates.append("progress = ?")
+            params.append(float(progress))
+        if current_step_id is not None:
+            updates.append("current_step_id = ?")
+            params.append(current_step_id)
+        if plan_json is not None:
+            updates.append("plan_json = ?")
+            params.append(plan_json)
+        if result_json is not None:
+            updates.append("result_json = ?")
+            params.append(result_json)
+        if completed_at is not None:
+            updates.append("completed_at = ?")
+            params.append(completed_at)
+
+        if not updates:
+            conn.close()
+            return
+
+        params.append(task_id)
+        sql = f"UPDATE tasks SET {', '.join(updates)} WHERE id = ?"
+        try:
+            with conn:
+                conn.execute(sql, tuple(params))
+        finally:
+            conn.close()
+
+    def get_task_record(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch a task record by ID."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def get_recent_task_records(self, limit: int = 15) -> List[Dict[str, Any]]:
+        """Retrieve recent task execution records."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, conversation_id, title, instruction, status, progress, current_step_id, created_at, completed_at
+                FROM tasks
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    # ---------------- Phase 5: Workflow Memory & Reuse ----------------
+
+    def save_workflow_template(
+        self,
+        name: str,
+        user_query: str,
+        plan_json: str,
+        steps_summary: str,
+        apps_used: str = "[]",
+        tools_used: str = "[]",
+        result_summary: str = "",
+        is_successful: int = 1,
+    ) -> str:
+        """Store or update a successful workflow template for future recall."""
+        conn = self._get_connection()
+        now = utc_now_iso()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, execution_count FROM workflows WHERE name = ?", (name,))
+            existing = cursor.fetchone()
+
+            if existing:
+                wf_id = existing["id"]
+                count = existing["execution_count"] + 1
+                with conn:
+                    conn.execute(
+                        """
+                        UPDATE workflows
+                        SET user_query = ?, plan_json = ?, steps_summary = ?, apps_used = ?,
+                            tools_used = ?, result_summary = ?, execution_count = ?,
+                            is_successful = ?, last_executed_at = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            user_query, plan_json, steps_summary, apps_used,
+                            tools_used, result_summary, count, is_successful, now, wf_id,
+                        ),
+                    )
+                return wf_id
+            else:
+                wf_id = str(uuid.uuid4())
+                with conn:
+                    conn.execute(
+                        """
+                        INSERT INTO workflows (
+                            id, name, user_query, plan_json, steps_summary,
+                            apps_used, tools_used, result_summary, execution_count,
+                            is_successful, created_at, last_executed_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+                        """,
+                        (
+                            wf_id, name, user_query, plan_json, steps_summary,
+                            apps_used, tools_used, result_summary, is_successful, now, now,
+                        ),
+                    )
+                return wf_id
+        finally:
+            conn.close()
+
+    def get_workflow_template(self, workflow_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch a workflow template by ID."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM workflows WHERE id = ?", (workflow_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def get_all_workflows(self) -> List[Dict[str, Any]]:
+        """List all remembered workflows sorted by execution count and recency."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, name, user_query, plan_json, steps_summary, apps_used, tools_used,
+                       result_summary, execution_count, is_successful, created_at, last_executed_at
+                FROM workflows
+                ORDER BY execution_count DESC, last_executed_at DESC
+                """
+            )
+            return [dict(r) for r in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def search_workflows(self, query: str) -> List[Dict[str, Any]]:
+        """Search remembered workflows by name or user query."""
+        q = f"%{query.strip().lower()}%"
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT * FROM workflows
+                WHERE LOWER(name) LIKE ? OR LOWER(user_query) LIKE ?
+                ORDER BY execution_count DESC, last_executed_at DESC
+                """,
+                (q, q),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def record_workflow_execution(self, workflow_id: str, is_successful: bool = True) -> None:
+        """Increment execution count and update timestamp of a workflow."""
+        conn = self._get_connection()
+        now = utc_now_iso()
+        try:
+            with conn:
+                conn.execute(
+                    """
+                    UPDATE workflows
+                    SET execution_count = execution_count + 1,
+                        is_successful = ?,
+                        last_executed_at = ?
+                    WHERE id = ?
+                    """,
+                    (1 if is_successful else 0, now, workflow_id),
+                )
         finally:
             conn.close()
 

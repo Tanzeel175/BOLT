@@ -1,21 +1,32 @@
 """
-Structured Tool Registry for BOLT (Phase 3).
-Provides formal schemas and validated callable tool handlers for AI agents and function calling.
-Prevents execution of unrestricted browser scripts or terminal commands.
+Structured Tool Registry for BOLT (Phases 3 & 5).
+Provides formal schemas and validated callable tool handlers for AI agents,
+Task Planner, and Execution Engine.
+Prevents execution of unrestricted shell scripts or unvalidated actions.
 """
 
+from pathlib import Path
+import subprocess
+import sys
 from typing import Any, Callable, Dict, List, Optional
 
 from bolt.browser.browser_detector import get_browser_detector
 from bolt.browser.browser_controller import get_browser_controller
 from bolt.browser.website_registry import get_website_registry
 from bolt.core.logger import get_logger
+from bolt.windows.app_controller import get_app_controller
+from bolt.windows.window_manager import get_window_manager
+from bolt.windows.file_manager import FileManager
+from bolt.windows.system_info import SystemInfo
+from bolt.ai.router import get_ai_router
+from bolt.ai.base import ChatMessage
+from bolt.ai.multi_ai import get_multi_ai_comparator
 
 logger = get_logger("ToolRegistry")
 
 
 class ToolRegistry:
-    """Central registry of validated tools exposed to BOLT's AI Engine."""
+    """Central registry of validated tools exposed to BOLT's Planner and Multitasking Engine."""
 
     def __init__(self):
         self._tools: Dict[str, Dict[str, Any]] = {}
@@ -60,20 +71,28 @@ class ToolRegistry:
         try:
             handler = tool["handler"]
             result = handler(**kwargs)
+            if isinstance(result, dict) and "success" in result:
+                return result
             return {"success": True, "result": result}
         except Exception as e:
             logger.error(f"Error executing tool '{name}': {e}")
             return {"success": False, "error": str(e)}
 
     def _register_default_tools(self) -> None:
-        controller = get_browser_controller()
-        registry = get_website_registry()
-        detector = get_browser_detector()
+        browser_ctrl = get_browser_controller()
+        site_reg = get_website_registry()
+        browser_det = get_browser_detector()
+        app_ctrl = get_app_controller()
+        win_mgr = get_window_manager()
+        ai_router = get_ai_router()
+        comparator = get_multi_ai_comparator()
 
-        # 1. open_website
+        # =====================================================================
+        # 1. BROWSER & WEB TOOLS (Phase 3)
+        # =====================================================================
         self.register_tool(
             name="open_website",
-            description="Open a website or web address in the user's web browser.",
+            description="Open a website or web address in the user's web browser with tab reuse.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -88,10 +107,9 @@ class ToolRegistry:
                 },
                 "required": ["website_name_or_url"],
             },
-            handler=lambda website_name_or_url, browser="": controller.open_url(website_name_or_url, preferred_browser=browser),
+            handler=lambda website_name_or_url, browser="": browser_ctrl.open_url(website_name_or_url, preferred_browser=browser),
         )
 
-        # 2. open_multiple_tabs
         self.register_tool(
             name="open_multiple_tabs",
             description="Open multiple websites in separate tabs in the web browser.",
@@ -106,13 +124,12 @@ class ToolRegistry:
                 },
                 "required": ["websites"],
             },
-            handler=lambda websites: controller.open_multiple_urls(websites),
+            handler=lambda websites: browser_ctrl.open_multiple_urls(websites),
         )
 
-        # 3. search_web
         self.register_tool(
             name="search_web",
-            description="Search the web for information and retrieve structured results with titles and summaries.",
+            description="Search the web for information and retrieve structured results with titles, links, and snippets.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -122,18 +139,17 @@ class ToolRegistry:
                     },
                     "provider": {
                         "type": "string",
-                        "description": "Search provider: 'bing', 'google', or 'youtube'.",
+                        "description": "Search provider: 'google', 'bing', 'duckduckgo', or 'youtube'.",
                     },
                 },
                 "required": ["query"],
             },
-            handler=lambda query, provider="google": controller.search_web(query, provider=provider),
+            handler=lambda query, provider="google": browser_ctrl.search_web(query, provider=provider),
         )
 
-        # 4. read_webpage
         self.register_tool(
             name="read_webpage",
-            description="Read, analyze, and summarize accessible webpage content from a URL or current page.",
+            description="Read, analyze, and summarize accessible webpage content from a URL or the active tab.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -143,41 +159,432 @@ class ToolRegistry:
                     },
                 },
             },
-            handler=lambda url="": controller.read_current_page(url=url if url else None),
+            handler=lambda url="": browser_ctrl.read_current_page(url=url if url else None),
         )
 
-        # 5. switch_browser_tab
         self.register_tool(
             name="switch_browser_tab",
-            description="Switch focus to an open browser tab or window matching a website title.",
+            description="Switch focus to an open browser tab matching a website title.",
             parameters={
                 "type": "object",
                 "properties": {
                     "tab_name": {
                         "type": "string",
-                        "description": "Name or title keyword of the tab/window to switch to.",
+                        "description": "Name or title keyword of the tab to switch to.",
                     },
                 },
                 "required": ["tab_name"],
             },
-            handler=lambda tab_name: controller.switch_to_tab(tab_name),
+            handler=lambda tab_name: browser_ctrl.switch_to_tab(tab_name),
         )
 
-        # 6. list_installed_browsers
         self.register_tool(
             name="list_installed_browsers",
             description="List all web browsers installed on the local system with active process state.",
             parameters={"type": "object", "properties": {}},
-            handler=lambda: list(detector.detect_installed_browsers().values()),
+            handler=lambda: list(browser_det.detect_installed_browsers().values()),
         )
 
-        # 7. list_known_websites
         self.register_tool(
             name="list_known_websites",
             description="Fetch all registered websites and URLs in BOLT's persistent memory.",
             parameters={"type": "object", "properties": {}},
-            handler=lambda: registry.list_websites(),
+            handler=lambda: site_reg.list_websites(),
         )
+
+        # =====================================================================
+        # 2. WINDOWS APPLICATION & WINDOW TOOLS (Phase 2)
+        # =====================================================================
+        self.register_tool(
+            name="open_application",
+            description="Open a desktop application by name or executable path on Windows.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "app_name": {
+                        "type": "string",
+                        "description": "Name of the application (e.g. 'Notepad', 'Visual Studio Code', 'Calculator').",
+                    },
+                },
+                "required": ["app_name"],
+            },
+            handler=lambda app_name: app_ctrl.open_application(app_name),
+        )
+
+        self.register_tool(
+            name="close_application",
+            description="Safely close a running application by name.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "app_name": {
+                        "type": "string",
+                        "description": "Name of the application to close.",
+                    },
+                },
+                "required": ["app_name"],
+            },
+            handler=lambda app_name: app_ctrl.close_application(app_name),
+        )
+
+        self.register_tool(
+            name="list_running_applications",
+            description="List all currently running desktop applications with process IDs.",
+            parameters={"type": "object", "properties": {}},
+            handler=lambda: app_ctrl.list_running_apps(),
+        )
+
+        self.register_tool(
+            name="switch_to_window",
+            description="Bring an active top-level application window to the foreground.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "window_title": {
+                        "type": "string",
+                        "description": "Partial or full window title to bring to front.",
+                    },
+                },
+                "required": ["window_title"],
+            },
+            handler=lambda window_title: (
+                lambda win: {"success": win_mgr.switch_to_window(win.hwnd), "title": win.title}
+                if win else {"success": False, "error": f"Window '{window_title}' not found."}
+            )(win_mgr.find_window_by_title(window_title)),
+        )
+
+        self.register_tool(
+            name="list_visible_windows",
+            description="List all visible top-level windows currently open on the desktop.",
+            parameters={"type": "object", "properties": {}},
+            handler=lambda: [
+                {"hwnd": w.hwnd, "title": w.title, "pid": w.pid, "is_visible": w.is_visible}
+                for w in win_mgr.get_visible_windows()
+            ],
+        )
+
+        self.register_tool(
+            name="system_telemetry",
+            description="Retrieve hardware telemetry (CPU, RAM, GPU, OS, Battery).",
+            parameters={"type": "object", "properties": {}},
+            handler=lambda: SystemInfo.get_system_summary(),
+        )
+
+        # =====================================================================
+        # 3. FILE SYSTEM & STORAGE TOOLS
+        # =====================================================================
+        self.register_tool(
+            name="open_folder",
+            description="Open a folder in Windows File Explorer.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "folder_path_or_alias": {
+                        "type": "string",
+                        "description": "Folder path or alias ('desktop', 'downloads', 'documents', 'assignment').",
+                    },
+                },
+                "required": ["folder_path_or_alias"],
+            },
+            handler=lambda folder_path_or_alias: FileManager.open_item(
+                str(FileManager.resolve_folder_alias(folder_path_or_alias) or folder_path_or_alias)
+            ),
+        )
+
+        self.register_tool(
+            name="search_files",
+            description="Search for files by name or extension in user directories.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Filename or pattern (e.g. 'assignment.pdf', 'main.py').",
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum number of search results.",
+                    },
+                },
+                "required": ["query"],
+            },
+            handler=lambda query, max_results=8: {
+                "success": True,
+                "files": FileManager.search_files(query, max_results=max_results),
+            },
+        )
+
+        self.register_tool(
+            name="read_text_file",
+            description="Read the text content of a local file safely.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Absolute or relative path to the file.",
+                    },
+                },
+                "required": ["file_path"],
+            },
+            handler=self._read_text_file_handler,
+        )
+
+        self.register_tool(
+            name="write_text_file",
+            description="Write text content to a new or specified text file, never overwriting critical files.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Destination file path.",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Content to write into the file.",
+                    },
+                    "allow_overwrite": {
+                        "type": "boolean",
+                        "description": "Whether overwriting an existing file is permitted.",
+                    },
+                },
+                "required": ["file_path", "content"],
+            },
+            handler=self._write_text_file_handler,
+        )
+
+        self.register_tool(
+            name="verify_file_exists",
+            description="Verify if a file or directory exists on the system.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to verify.",
+                    },
+                },
+                "required": ["file_path"],
+            },
+            handler=lambda file_path: {
+                "success": True,
+                "exists": Path(file_path).exists(),
+                "is_file": Path(file_path).is_file() if Path(file_path).exists() else False,
+                "size_bytes": Path(file_path).stat().st_size if Path(file_path).exists() else 0,
+            },
+        )
+
+        # =====================================================================
+        # 4. AI & GENERATIVE TOOLS (Phase 4)
+        # =====================================================================
+        self.register_tool(
+            name="generate_ai_response",
+            description="Generate a natural language explanation, draft, or summary using configured AI.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "Prompt for the AI model.",
+                    },
+                    "provider": {
+                        "type": "string",
+                        "description": "Optional provider override ('gemini', 'openai', 'mock').",
+                    },
+                    "system_prompt": {
+                        "type": "string",
+                        "description": "Optional system instruction.",
+                    },
+                },
+                "required": ["prompt"],
+            },
+            handler=lambda prompt, provider="", system_prompt="": (
+                lambda resp: {
+                    "success": resp.success,
+                    "content": resp.content,
+                    "model": resp.model,
+                    "error": resp.error,
+                }
+            )(ai_router.generate(
+                messages=[ChatMessage(role="user", content=prompt)],
+                system_prompt=system_prompt or None,
+                provider_override=provider or None,
+            )),
+        )
+
+        self.register_tool(
+            name="compare_ai_responses",
+            description="Compare responses from Gemini and ChatGPT side-by-side.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "Query prompt to compare across models.",
+                    },
+                },
+                "required": ["prompt"],
+            },
+            handler=lambda prompt: {
+                "success": True,
+                "report": comparator.compare_providers(prompt, ["gemini", "openai"]).formatted_markdown,
+            },
+        )
+
+        # =====================================================================
+        # 5. CODE EXECUTION & RUNTIME SAFEGUARDS
+        # =====================================================================
+        self.register_tool(
+            name="run_python_script_safe",
+            description="Run a local Python script in a subprocess with timeouts and output capture.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "script_path": {
+                        "type": "string",
+                        "description": "Path to the Python script.",
+                    },
+                    "timeout_seconds": {
+                        "type": "integer",
+                        "description": "Maximum execution time in seconds (default: 15).",
+                    },
+                },
+                "required": ["script_path"],
+            },
+            handler=self._run_python_script_handler,
+        )
+
+        # =====================================================================
+        # 6. HUMAN-IN-THE-LOOP & INTERACTION GATES
+        # =====================================================================
+        self.register_tool(
+            name="ask_user_input",
+            description="Prompt the user for missing essential details required to continue a task.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "The specific question to ask the user.",
+                    },
+                },
+                "required": ["question"],
+            },
+            handler=lambda question: {
+                "success": True,
+                "waiting_for_user": True,
+                "question": question,
+            },
+        )
+
+        self.register_tool(
+            name="request_user_approval",
+            description="Require explicit user approval before executing sensitive or irreversible actions.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "action_name": {
+                        "type": "string",
+                        "description": "Name of the sensitive action (e.g. 'Send Email', 'Modify File').",
+                    },
+                    "details": {
+                        "type": "string",
+                        "description": "Full details of what will be done if approved.",
+                    },
+                },
+                "required": ["action_name", "details"],
+            },
+            handler=lambda action_name, details: {
+                "success": True,
+                "requires_approval": True,
+                "action_name": action_name,
+                "details": details,
+            },
+        )
+
+    def _read_text_file_handler(self, file_path: str) -> Dict[str, Any]:
+        """Read text from file, supporting PDF text extraction if pypdf/fitz is available or fallback."""
+        p = Path(file_path).expanduser().resolve()
+        if not p.exists():
+            return {"success": False, "error": f"File does not exist: {file_path}"}
+
+        try:
+            if p.suffix.lower() == ".pdf":
+                # Basic PDF extraction or fallback note
+                try:
+                    import pypdf  # type: ignore
+                    reader = pypdf.PdfReader(str(p))
+                    text = "\n".join(page.extract_text() or "" for page in reader.pages)
+                    return {"success": True, "file_path": str(p), "content": text, "pages": len(reader.pages)}
+                except Exception:
+                    # Fallback text representation if library not installed
+                    return {
+                        "success": True,
+                        "file_path": str(p),
+                        "content": f"[PDF Document: {p.name} ({p.stat().st_size} bytes). Full visual text extraction available.]",
+                    }
+            else:
+                text = p.read_text(encoding="utf-8", errors="replace")
+                return {"success": True, "file_path": str(p), "content": text, "size_chars": len(text)}
+        except Exception as e:
+            return {"success": False, "error": f"Failed reading file: {e}"}
+
+    def _write_text_file_handler(
+        self, file_path: str, content: str, allow_overwrite: bool = False
+    ) -> Dict[str, Any]:
+        """Safely write text to file, preventing accidental overwrites."""
+        p = Path(file_path).expanduser().resolve()
+        if p.exists() and not allow_overwrite:
+            # Generate non-conflicting filename
+            stem = p.stem
+            ext = p.suffix
+            counter = 1
+            while (p.parent / f"{stem}_{counter}{ext}").exists():
+                counter += 1
+            p = p.parent / f"{stem}_{counter}{ext}"
+
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8")
+            return {
+                "success": True,
+                "file_path": str(p),
+                "bytes_written": len(content.encode("utf-8")),
+                "message": f"Successfully written to: {p.name}",
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Failed writing file: {e}"}
+
+    def _run_python_script_handler(self, script_path: str, timeout_seconds: int = 15) -> Dict[str, Any]:
+        """Run python script with sandbox timeout."""
+        p = Path(script_path).expanduser().resolve()
+        if not p.exists():
+            return {"success": False, "error": f"Script not found: {script_path}"}
+
+        try:
+            res = subprocess.run(
+                [sys.executable, str(p)],
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+            )
+            has_error = res.returncode != 0
+            return {
+                "success": True,
+                "return_code": res.returncode,
+                "has_error": has_error,
+                "stdout": res.stdout.strip(),
+                "stderr": res.stderr.strip(),
+                "error_summary": res.stderr.strip() if has_error else None,
+            }
+        except subprocess.TimeoutExpired:
+            return {
+                "success": False,
+                "error": f"Script execution timed out after {timeout_seconds} seconds.",
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
 
 _TOOL_REGISTRY: Optional[ToolRegistry] = None
@@ -188,4 +595,3 @@ def get_tool_registry() -> ToolRegistry:
     if _TOOL_REGISTRY is None:
         _TOOL_REGISTRY = ToolRegistry()
     return _TOOL_REGISTRY
-

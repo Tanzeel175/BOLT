@@ -27,8 +27,8 @@ client_secret*.json
 *.db-journal
 *.db-wal
 *.db-shm
-data/*.db*
-data/*.sqlite*
+data/
+!data/.gitkeep
 
 # 3. Application Logs & Telemetry
 logs/

@@ -4,7 +4,7 @@
 
 ---
 
-## 🎯 Current Milestone: Phase 4 – AI Application Integration (COMPLETED)
+## 🎯 Current Milestone: Phase 5 – Intelligent Task Planning & Multitasking (COMPLETED)
 
 ### Complete Implemented Capabilities:
 
@@ -41,6 +41,19 @@
 - 🔀 **Dual-Method AI Integration**: Seamlessly switches between programmatic API (Method A) and browser-based web navigation (Method B: `"Open ChatGPT in my browser"`).
 - 🔒 **Zero-Faking Security Policy**: When API keys are missing, provides actionable setup instructions instead of fabricated responses; masks keys in settings and logs.
 
+#### 5. Intelligent Task Planning and Multitasking (Phase 5)
+- 📋 **Directed Acyclic Graph (DAG) Task Planner**: Decomposes complex multi-action instructions into validated execution steps with dependencies, inputs, outputs, and risk levels.
+- 🔀 **Task Dependency Management & Data Piping**: Resolves placeholder tokens (`${step_id.attribute}`) to pipe data from earlier steps into dependent inputs; runs independent steps in parallel.
+- 🔄 **Autonomous Fault Recovery**: Automatic retries for transient faults and fallback routes (Google -> DuckDuckGo -> Bing; Gemini -> OpenAI -> Local Mock; broad file searches).
+- 🛑 **Human-in-the-Loop Approval Gates**: Enforces strict approval gates on sensitive actions (email sending, file modifications, script execution) before continuing.
+- 🧠 **Workflow Memory & Reuse**: SQLite persistence in `workflows` table allowing BOLT to recall and re-execute successful past procedures (*"Do the same process you used last time to prepare my research summary"*).
+- 🖥️ **Task Activity Panel (PySide6)**: Collapsible activity dock with real-time progress bar (0–100%), interactive step checklist, and `Pause ⏸`, `Resume ▶`, `Cancel ⏹`, `Approve ✅`, `Reject ❌` controls.
+- 🎯 **Core Workflows Implemented**:
+  - **Workflow A (AI Research)**: Search web -> Collect sources -> AI summarize with citations.
+  - **Workflow B (Email Preparation)**: Draft email -> Display -> Approval gate -> Open Gmail -> Require explicit approval before sending.
+  - **Workflow C (Programming Assistance)**: Locate project -> Open in VS Code -> Run in sandbox -> AI error diagnosis -> Require approval before modifying code.
+  - **Workflow D (Document Processing)**: Locate document -> Read content -> Summarize -> Write separate file -> Verify file integrity.
+
 ---
 
 ## 📁 Project Architecture
@@ -55,7 +68,7 @@ BOLT/
 ├── DEVELOPMENT_PROGRESS.md # Phase-by-phase development tracker
 ├── run.py                # Main application entry point
 ├── data/
-│   └── bolt.db           # SQLite database (conversations, registry, preferences)
+│   └── bolt.db           # SQLite database (conversations, registry, workflows, tasks)
 ├── logs/
 │   └── bolt.log          # Application log file (rotating)
 ├── tests/
@@ -64,7 +77,9 @@ BOLT/
 │   ├── test_phase3.py                # Phase 3 browser tests
 │   ├── test_phase3_ui_interaction.py # Phase 3 UI E2E test
 │   ├── test_phase4.py                # Phase 4 AI integration tests
-│   └── test_phase4_ui_interaction.py # Phase 4 UI E2E test
+│   ├── test_phase4_ui_interaction.py # Phase 4 UI E2E test
+│   ├── test_phase5.py                # Phase 5 Task Planning tests
+│   └── test_phase5_ui_interaction.py # Phase 5 UI E2E test
 └── bolt/
     ├── config/           # Application constants & settings management
     ├── core/             # SQLite persistence, telemetry, and logger
@@ -72,7 +87,8 @@ BOLT/
     ├── browser/          # Browser detector, Playwright controller, registry, reader
     ├── windows/          # App discovery, lifecycle, window & file managers, intent dispatcher
     ├── ui/               # PySide6 desktop interface and components
-    └── tasks/            # Tool registry and task planning scaffolding
+    │   └── components/   # Header, Sidebar, ChatView, InputBar, TaskStatus, TaskActivityPanel
+    └── tasks/            # Models, Planner, DependencyManager, ExecutionEngine, Recovery, Memory
 ```
 
 ---
@@ -105,6 +121,10 @@ Run with the virtual environment Python:
 # Phase 4
 .\.venv\Scripts\python.exe -u tests/test_phase4.py
 .\.venv\Scripts\python.exe -u tests/test_phase4_ui_interaction.py
+
+# Phase 5
+.\.venv\Scripts\python.exe -u tests/test_phase5.py
+.\.venv\Scripts\python.exe -u tests/test_phase5_ui_interaction.py
 ```
 
 ---
@@ -114,7 +134,7 @@ Run with the virtual environment Python:
 - [x] **Phase 2:** Computer Understanding and Application Control
 - [x] **Phase 3:** Browser and Website Intelligence
 - [x] **Phase 4:** AI Application Integration
-- [ ] **Phase 5:** Intelligent Task Planning and Multitasking
+- [x] **Phase 5:** Intelligent Task Planning and Multitasking
 - [ ] **Phase 6:** Visual Computer Use
 - [ ] **Phase 7:** Voice Assistant
 - [ ] **Phase 8:** Long-Term Memory and Learning

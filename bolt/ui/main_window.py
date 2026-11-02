@@ -29,6 +29,7 @@ from bolt.ui.components.sidebar import Sidebar
 from bolt.ui.components.chat_view import ChatView
 from bolt.ui.components.input_bar import InputBar
 from bolt.ui.components.task_status import TaskStatusBar
+from bolt.ui.components.task_activity_panel import TaskActivityPanel
 from bolt.ui.components.settings_dialog import SettingsDialog
 from bolt.windows.intent_dispatcher import WindowsIntentDispatcher, get_intent_dispatcher
 
@@ -129,6 +130,12 @@ class MainWindow(QMainWindow):
         chat_layout.addWidget(self.input_bar)
 
         body_layout.addWidget(chat_workspace, stretch=1)
+
+        # Phase 5: Task Activity Panel (Collapsible Dock on Right)
+        self.task_panel = TaskActivityPanel(self)
+        self.task_panel.setVisible(False)
+        body_layout.addWidget(self.task_panel)
+
         root_layout.addWidget(body_widget, stretch=1)
 
         # 3. Bottom Task Status Bar
@@ -164,6 +171,12 @@ class MainWindow(QMainWindow):
 
         # Input submission
         self.input_bar.message_submitted.connect(self._handle_user_message)
+
+        # Task Activity Panel controls (Phase 5)
+        self.task_panel.pause_requested.connect(self._on_task_pause_requested)
+        self.task_panel.resume_requested.connect(self._on_task_resume_requested)
+        self.task_panel.cancel_requested.connect(self._on_task_cancel_requested)
+        self.task_panel.approval_decided.connect(self._on_task_approval_decided)
 
     def _load_conversations_and_initial_chat(self):
         """Load conversation list from SQLite and open the latest or create a new one."""
@@ -265,10 +278,24 @@ class MainWindow(QMainWindow):
             conversations = self.db.get_conversations()
             self.sidebar.set_conversations(conversations, active_id=self.current_conv_id)
 
-        # 4. Check if instruction is a direct Windows, Browser, or Multi-AI Operation
+        # 4. Check if instruction is a direct Windows, Browser, Multi-AI, or Multi-Task Operation
         intent = self.intent_dispatcher.dispatch(text)
         if intent.is_windows_action:
-            if intent.action_type == "compare_ai":
+            if intent.action_type == "multi_action_task":
+                model_used = "BOLT Task Planner"
+                if intent.raw_data and "plan" in intent.raw_data:
+                    from bolt.tasks.models import ExecutionPlan, TaskStatus
+                    plan_obj = ExecutionPlan.from_dict(intent.raw_data["plan"])
+                    self.task_panel.set_plan(plan_obj)
+                    self.task_panel.setVisible(True)
+                    if plan_obj.status == TaskStatus.WAITING_APPROVAL:
+                        waiting_steps = [s for s in plan_obj.steps if s.status == TaskStatus.WAITING_APPROVAL]
+                        if waiting_steps:
+                            self.task_panel.show_approval_prompt(
+                                waiting_steps[0].step_id,
+                                waiting_steps[0].approval_prompt or "Approval required to proceed.",
+                            )
+            elif intent.action_type == "compare_ai":
                 model_used = "BOLT Multi-AI Engine"
             elif intent.action_type in [
                 "open_website", "multi_browser_nav", "web_search",
@@ -391,3 +418,47 @@ class MainWindow(QMainWindow):
         self._sync_header_badge()
         self.status_bar.set_ready("Settings updated successfully")
         logger.info("Settings reloaded and synced across UI.")
+
+    # ---------------- Phase 5: Task Activity Panel Callbacks ----------------
+
+    def _on_task_pause_requested(self):
+        from bolt.tasks.multitasking_manager import get_multitasking_manager
+        mgr = get_multitasking_manager()
+        if mgr.last_active_plan and mgr.last_active_plan.plan_id in mgr._active_workers:
+            mgr._active_workers[mgr.last_active_plan.plan_id].pause_task()
+        self.status_bar.set_ready("Task paused")
+
+    def _on_task_resume_requested(self):
+        from bolt.tasks.multitasking_manager import get_multitasking_manager
+        mgr = get_multitasking_manager()
+        if mgr.last_active_plan and mgr.last_active_plan.plan_id in mgr._active_workers:
+            mgr._active_workers[mgr.last_active_plan.plan_id].resume_task()
+        self.status_bar.set_ready("Task resumed")
+
+    def _on_task_cancel_requested(self):
+        from bolt.tasks.multitasking_manager import get_multitasking_manager
+        mgr = get_multitasking_manager()
+        if mgr.last_active_plan and mgr.last_active_plan.plan_id in mgr._active_workers:
+            mgr._active_workers[mgr.last_active_plan.plan_id].cancel_task()
+        self.status_bar.set_ready("Task cancelled")
+
+    def _on_task_approval_decided(self, step_id: str, approved: bool):
+        from bolt.tasks.multitasking_manager import get_multitasking_manager
+        from bolt.tasks.models import TaskStatus
+        mgr = get_multitasking_manager()
+        res_plan = mgr.provide_user_decision(approved=approved)
+        if res_plan:
+            self.task_panel.set_plan(res_plan)
+            summary_md = mgr.format_plan_summary_markdown(res_plan)
+            if self.current_conv_id:
+                self.db.add_message(
+                    conversation_id=self.current_conv_id,
+                    role="assistant",
+                    content=summary_md,
+                    model="BOLT Task Planner",
+                )
+            self.chat_view.add_message(
+                role="assistant",
+                content=summary_md,
+                model="BOLT Task Planner",
+            )

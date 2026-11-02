@@ -45,6 +45,52 @@ class WindowsIntentDispatcher:
         self.file_mgr = file_mgr or get_file_manager()
         self.browser_controller = browser_controller or get_browser_controller()
 
+    def _is_multi_action_instruction(self, lower: str) -> bool:
+        """Identify whether an instruction contains multiple sequential/compound steps."""
+        # 1. Workflow Memory recall query
+        if any(k in lower for k in ["same process", "last time", "repeat workflow"]):
+            return True
+
+        # 2. Workflow A (AI Research & Summarize)
+        if ("research" in lower or "find information" in lower or "latest" in lower) and "summarize" in lower:
+            return True
+
+        # 3. Workflow B (Email draft & approval)
+        if "email" in lower and any(v in lower for v in ["write", "draft", "prepare", "compose"]) and any(w in lower for w in ["and", "show", "send", "review"]):
+            return True
+
+        # Exclusions for Phase 4 single provider query without multi-step chaining
+        if re.match(r"^ask\s+(gemini|chatgpt|openai|mock)\s+", lower):
+            if not any(conj in lower for conj in ["and show", "and send", "and then", "and save", "and explain", ", and"]):
+                return False
+
+        # 4. Workflow C (Python project / run / errors / fix)
+        if any(term in lower for term in ["python project", "run it", "identify errors", "fix errors", "explain how to fix"]):
+            return True
+
+        # 5. Workflow D (Assignment / PDF / document summarize & save)
+        if any(term in lower for term in ["assignment", "pdf", "document"]) and "summarize" in lower and any(s in lower for s in ["save", "text file", "separate file"]):
+            return True
+
+        # Exclusions for Phase 3/4 single commands
+        if lower.startswith("compare ") and any(p in lower for p in ["gemini", "chatgpt", "openai"]):
+            return False
+        if "in separate tabs" in lower or "in tabs" in lower:
+            return False
+        if re.match(r"^(?:open\s+)?[a-zA-Z0-9\s\-]+?\s+and\s+search\s+", lower):
+            return False
+
+        # 6. Compound actions: multiple verbs + conjunctions
+        action_verbs = ["open", "search", "summarize", "save", "find", "ask", "run", "explain", "launch", "write", "compare"]
+        conjunctions = [", and ", " and then ", ", then ", " and summarize ", " and save ", " and explain ", " and show "]
+
+        verb_count = sum(1 for v in action_verbs if f" {v} " in f" {lower} ")
+        has_conjunction = any(c in lower for c in conjunctions) or ("," in lower and " and " in lower)
+        if verb_count >= 2 and has_conjunction:
+            return True
+
+        return False
+
     def dispatch(self, text: str) -> IntentResult:
         """Analyze text and execute matching Windows or Browser operation if detected."""
         clean = text.strip()
@@ -205,6 +251,41 @@ class WindowsIntentDispatcher:
                 success=True,
                 title="Open Tabs",
                 content=content,
+            )
+
+        # ---------------- Phase 5: Human-in-the-Loop Decision Delivery ----------------
+        if lower_stripped in ["yes", "approve", "approved", "proceed", "sure", "ok", "i approve", "no", "reject", "cancel"]:
+            from bolt.tasks.multitasking_manager import get_multitasking_manager
+            from bolt.tasks.models import TaskStatus
+            mgr = get_multitasking_manager()
+            if mgr.last_active_plan and mgr.last_active_plan.status == TaskStatus.WAITING_APPROVAL:
+                approved = lower_stripped in ["yes", "approve", "approved", "proceed", "sure", "ok", "i approve"]
+                res_plan = mgr.provide_user_decision(approved=approved)
+                if res_plan:
+                    summary_md = mgr.format_plan_summary_markdown(res_plan)
+                    return IntentResult(
+                        is_windows_action=True,
+                        action_type="multi_action_task",
+                        success=res_plan.is_completed() or res_plan.status == TaskStatus.WAITING_APPROVAL,
+                        title=f"{res_plan.title}: {'Approved' if approved else 'Rejected'}",
+                        content=summary_md,
+                        raw_data={"plan": res_plan.to_dict(), "plan_id": res_plan.plan_id},
+                    )
+
+        # ---------------- Phase 5: Intelligent Task Planning & Multitasking ----------------
+        if self._is_multi_action_instruction(lower_stripped):
+            from bolt.tasks.multitasking_manager import get_multitasking_manager
+            from bolt.tasks.models import TaskStatus
+            mgr = get_multitasking_manager()
+            plan = mgr.plan_and_execute_sync(clean)
+            summary_md = mgr.format_plan_summary_markdown(plan)
+            return IntentResult(
+                is_windows_action=True,
+                action_type="multi_action_task",
+                success=plan.is_completed() or plan.status == TaskStatus.WAITING_APPROVAL,
+                title=plan.title,
+                content=summary_md,
+                raw_data={"plan": plan.to_dict(), "plan_id": plan.plan_id, "status": plan.status.value},
             )
 
         # ---------------- Phase 3: Multi-Website Navigation in Separate Tabs ----------------
