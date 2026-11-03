@@ -23,6 +23,9 @@ from bolt.ai.base import ChatMessage
 from bolt.ai.multi_ai import get_multi_ai_comparator
 from bolt.windows.input_controller import InputController
 from bolt.core.network_manager import get_network_manager
+from bolt.windows.ui_automation import get_ui_automation_manager
+from bolt.windows.hybrid_controller import get_hybrid_controller
+from bolt.windows.performance_benchmark import get_performance_benchmark
 
 logger = get_logger("ToolRegistry")
 
@@ -643,6 +646,133 @@ class ToolRegistry:
                 "action_name": action_name,
                 "details": details,
             },
+        )
+
+        # =====================================================================
+        # 7. EVENT-DRIVEN COMPUTER CONTROL & UI AUTOMATION (Phase 6)
+        # =====================================================================
+        self.register_tool(
+            name="uia_inspect_window",
+            description="Inspect accessible controls, buttons, text fields, and identifiers in a window via UI Automation without capturing screenshots.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "window_query": {
+                        "type": "string",
+                        "description": "Name or title substring of the window to inspect.",
+                    },
+                },
+            },
+            handler=lambda window_query="": get_ui_automation_manager().inspect_window(window_query=window_query or None),
+        )
+
+        self.register_tool(
+            name="uia_click_element",
+            description="Click a button or control by semantic name, label, or automation ID using Windows UI Automation without screenshots.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "window_name": {
+                        "type": "string",
+                        "description": "Name or title substring of the target window.",
+                    },
+                    "element_name": {
+                        "type": "string",
+                        "description": "Semantic name, label, or automation ID of the control to click (e.g. 'Save', 'Minimise').",
+                    },
+                },
+                "required": ["window_name", "element_name"],
+            },
+            handler=lambda window_name, element_name: get_hybrid_controller().click_button_by_name(window_name, element_name),
+        )
+
+        self.register_tool(
+            name="uia_get_element_value",
+            description="Read accessible text or value from a text box, document, or control via UI Automation without screenshots.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "window_name": {
+                        "type": "string",
+                        "description": "Target window title substring.",
+                    },
+                    "element_name": {
+                        "type": "string",
+                        "description": "Optional name or ID of the control. Omit to read active document text.",
+                    },
+                },
+                "required": ["window_name"],
+            },
+            handler=lambda window_name, element_name="": get_hybrid_controller().read_accessible_text(window_name, element_name or None),
+        )
+
+        self.register_tool(
+            name="uia_set_element_value",
+            description="Directly set the text or value of an accessible control via UI Automation without typing latency.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "window_name": {
+                        "type": "string",
+                        "description": "Target window title substring.",
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Text to set.",
+                    },
+                    "element_name": {
+                        "type": "string",
+                        "description": "Optional control name or automation ID.",
+                    },
+                },
+                "required": ["window_name", "text"],
+            },
+            handler=lambda window_name, text, element_name="": get_hybrid_controller().set_accessible_text(window_name, text, element_name or None),
+        )
+
+        self.register_tool(
+            name="uia_calculate",
+            description="Calculate a mathematical expression directly in Windows Calculator using accessible controls.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "expression": {
+                        "type": "string",
+                        "description": "Arithmetic expression to calculate (e.g. '125 * 25', '50 + 75').",
+                    },
+                },
+                "required": ["expression"],
+            },
+            handler=lambda expression="125 * 25": get_hybrid_controller().calculate_accessible(expression),
+        )
+
+        self.register_tool(
+            name="ocr_screen_region",
+            description="Perform local Windows Media OCR on a specific window or screen region on-demand without cloud AI.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "window_title": {
+                        "type": "string",
+                        "description": "Optional window title to capture and OCR.",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Reason for visual inspection (e.g. 'inaccessible control', 'visual error').",
+                    },
+                },
+            },
+            handler=lambda window_title="", reason="On-demand visual check": get_hybrid_controller().inspect_visual_region_on_demand(window_title=window_title or None, reason=reason),
+        )
+
+        self.register_tool(
+            name="run_performance_benchmark",
+            description="Benchmark and compare execution speed, RAM, and CPU between Direct APIs, UI Automation, and Screenshot Vision.",
+            parameters={
+                "type": "object",
+                "properties": {},
+            },
+            handler=lambda: get_performance_benchmark().run_all_benchmarks(),
         )
 
     def _read_text_file_handler(self, file_path: str) -> Dict[str, Any]:

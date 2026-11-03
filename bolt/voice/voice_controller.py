@@ -97,3 +97,4 @@ def get_voice_controller() -> VoiceController:
     if _VOICE_CONTROLLER_INSTANCE is None:
         _VOICE_CONTROLLER_INSTANCE = VoiceController()
     return _VOICE_CONTROLLER_INSTANCE
+

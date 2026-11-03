@@ -9,6 +9,10 @@ from .app_controller import AppController, get_app_controller
 from .file_manager import FileManager, get_file_manager
 from .system_info import SystemInfo
 from .intent_dispatcher import WindowsIntentDispatcher, get_intent_dispatcher, IntentResult
+from .ui_automation import UIAutomationManager, get_ui_automation_manager
+from .vision_engine import VisionEngine, get_vision_engine
+from .hybrid_controller import HybridController, get_hybrid_controller
+from .performance_benchmark import PerformanceBenchmark, get_performance_benchmark
 
 __all__ = [
     "ApplicationDiscovery",
@@ -26,5 +30,13 @@ __all__ = [
     "WindowsIntentDispatcher",
     "get_intent_dispatcher",
     "IntentResult",
+    "UIAutomationManager",
+    "get_ui_automation_manager",
+    "VisionEngine",
+    "get_vision_engine",
+    "HybridController",
+    "get_hybrid_controller",
+    "PerformanceBenchmark",
+    "get_performance_benchmark",
 ]
 

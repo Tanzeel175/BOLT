@@ -75,6 +75,9 @@ class WindowsIntentDispatcher:
         # Exclusions for Phase 3/4 single commands
         if lower.startswith("compare ") and any(p in lower for p in ["gemini", "chatgpt", "openai"]):
             return False
+        # Phase 6 single calculation exclusion: e.g. "calculate 125 * 25"
+        if lower.startswith("calculate ") or lower.startswith("compute ") or lower.startswith("solve "):
+            return False
         # Multi-tab single intent exclusion: e.g. "open google and github in separate tabs"
         if "in separate tabs" in lower or "in tabs" in lower:
             return False
@@ -375,6 +378,77 @@ class WindowsIntentDispatcher:
                 success=True,
                 title=f"Search: {clean_search_query}",
                 content=search_res.get("summary_md", ""),
+            )
+
+        # ---------------- Phase 6: Direct UI Automation Calculator ----------------
+        calc_match = re.match(r"^(?:calculate|compute|solve)\s+([0-9\s\+\-\*\/\.x×÷=]+)$", lower_stripped)
+        if calc_match:
+            from bolt.windows.hybrid_controller import get_hybrid_controller
+            expr = calc_match.group(1).strip()
+            res = get_hybrid_controller().calculate_accessible(expr)
+            if res.get("success"):
+                content = (
+                    f"🔢 **Windows Calculator (UI Automation)**\n\n"
+                    f"- **Expression:** `{expr}`\n"
+                    f"- **Result:** **`{res.get('result', '')}`** ({res.get('display_text', '')})\n"
+                    f"- **Method:** Event-Driven UI Automation (0 screenshots)\n"
+                    f"- **Execution Time:** `{res.get('execution_time_ms', 0):.1f} ms`"
+                )
+            else:
+                content = f"⚠️ Calculation failed: {res.get('error')}"
+            return IntentResult(
+                is_windows_action=True,
+                action_type="calculate_accessible",
+                success=res.get("success", False),
+                title="Calculator",
+                content=content,
+                raw_data=res,
+            )
+
+        # ---------------- Phase 6: Semantic Click via UI Automation ----------------
+        click_match = re.match(
+            r"^click\s+(?:the\s+)?([^\n]+?)\s+button(?:\s+in\s+([^\n]+))?$",
+            lower_stripped,
+        )
+        if click_match and not any(k in lower_stripped for k in ["link", "tab", "url", "browser"]):
+            btn_name = click_match.group(1).strip()
+            win_name = (click_match.group(2) or "").strip()
+            from bolt.windows.hybrid_controller import get_hybrid_controller
+            res = get_hybrid_controller().click_button_by_name(window_name=win_name, button_name=btn_name)
+            content = f"🖱️ {res.get('message', res.get('error', 'Clicked button'))}"
+            return IntentResult(
+                is_windows_action=True,
+                action_type="uia_click",
+                success=res.get("success", False),
+                title=f"Click: {btn_name}",
+                content=content,
+                raw_data=res,
+            )
+
+        # ---------------- Phase 6: Event-Driven Performance Benchmark ----------------
+        if any(k in lower_stripped for k in ["run performance benchmark", "benchmark computer control", "benchmark performance", "run automation benchmark"]):
+            from bolt.windows.performance_benchmark import get_performance_benchmark
+            bm = get_performance_benchmark()
+            rep = bm.run_all_benchmarks()
+            lines = [
+                "### ⚡ BOLT Event-Driven vs Vision Benchmark Report\n",
+                f"- **Direct API Average:** `{rep['direct_api_avg_ms']} ms`",
+                f"- **UI Automation Average:** `{rep['ui_automation_avg_ms']} ms`",
+                f"- **Vision / Screenshot Average:** `{rep['vision_screenshot_avg_ms']} ms`",
+                f"- **Efficiency Advantage:** **{rep['speedup_vs_screenshots']}**\n",
+                "| Operation | Method | Time (ms) | RAM Delta (MB) | Success |",
+                "|---|---|---|---|---|",
+            ]
+            for m in rep["metrics"]:
+                lines.append(f"| {m['operation_name']} | {m['method_category']} | {m['execution_time_ms']} ms | {m['ram_delta_mb']} MB | {'✅' if m['success'] else '❌'} |")
+            lines.append(f"\n💡 *{rep['recommendation']}*")
+            return IntentResult(
+                is_windows_action=True,
+                action_type="performance_benchmark",
+                success=True,
+                title="Performance Benchmark",
+                content="\n".join(lines),
+                raw_data=rep,
             )
 
         # ---------------- 4. Open Folder / Directory ----------------

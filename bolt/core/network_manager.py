@@ -195,3 +195,4 @@ def get_network_manager() -> NetworkManager:
     if _NETWORK_MGR_INSTANCE is None:
         _NETWORK_MGR_INSTANCE = NetworkManager()
     return _NETWORK_MGR_INSTANCE
+

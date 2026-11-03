@@ -398,3 +398,4 @@ class OllamaProvider(AIProvider):
             "ram_delta_mb": ram_delta_mb,
             "response_snippet": response.content[:120] + "...",
         }
+

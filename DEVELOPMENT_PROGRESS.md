@@ -18,7 +18,7 @@
 | **Phase 4** | **AI Application Integration** | **COMPLETED** | **100% (All 9 unit/integration tests + UI E2E passing)** |
 | **Phase 5** | **Intelligent Task Planning and Multitasking** | **COMPLETED** | **100% (All 12 unit/integration tests + UI E2E passing)** |
 | **Special** | **Offline-First & Local AI Integration (Ollama)** | **COMPLETED** | **100% (All 12/12 empirical tests + 59/59 regression passing)** |
-| Phase 6 | Visual Computer Use | Pending | Next Planned Phase |
+| **Phase 6** | **Event-Driven Computer Control & UI Automation** | **COMPLETED** | **100% (All 10/10 empirical tests + 69/69 regression passing)** |
 | Phase 7 | Voice Assistant Expansion | In Progress (Local TTS Done) | Planned |
 | Phase 8 | Long-Term Memory and Learning | In Progress (7 SQLite Categories Done) | Planned |
 | Phase 9 | Security and Approval System | In Progress (Approval Gates Done) | Planned |
@@ -170,11 +170,79 @@ All 12 test cases passed cleanly (**100% success**):
 - [x] **Phase 4 Regression (`tests/test_phase4.py`):** **PASSED (9/9 tests)**
 - [x] **Phase 5 Automated Suite (`tests/test_phase5.py`):** **PASSED (12/12 tests)**
 - [x] **Phase 5 UI Interaction (`tests/test_phase5_ui_interaction.py`):** **PASSED**
+- [x] **Offline & Hardware Upgrade (`tests/test_offline_and_real_control.py`):** **PASSED (12/12 tests)**
+- [x] **Phase 6 Event-Driven Suite (`tests/test_phase6_event_driven.py`):** **PASSED (10/10 tests)**
 
 ---
 
-## ⏭️ Upcoming Phase: Phase 6 (Visual Computer Use)
-- Screen capture and multi-monitor geometry analysis.
-- Visual element detection, OCR, and coordinate mapping.
-- Visual grounding and UI component understanding.
-- Mouse and keyboard automation with visual verification.
+## 📌 Phase 6 Implementation Report: Event-Driven Computer Control & UI Automation
+
+### 1. Core Principle & Priority Hierarchy
+BOLT eliminates screenshot-heavy visual polling in favor of the cheapest, fastest, and most reliable interaction method available:
+1. **Direct Windows APIs & Process Tools** (Priority 1): Native Win32 / ShellExecute / Direct File APIs (0 screenshots).
+2. **Windows UI Automation & Accessibility APIs** (Priority 2): Control tree navigation, semantic invocation via `InvokePattern`, `TogglePattern`, and value extraction via `ValuePattern`/`TextPattern` (0 screenshots).
+3. **Keyboard Shortcuts & Structured Mouse Actions** (Priority 3): Win32 `SendInput` Unicode stream, keyboard hotkeys, and targeted window coordinate clicks (0 screenshots).
+4. **Local Windows Media OCR** (Priority 4): Selected region OCR using Windows 11 `Windows.Media.Ocr` (`winocr`), running 100% locally on CPU without network calls.
+5. **Screenshot-on-Demand & Local Vision AI** (Priority 5): Captured **only on-demand** when UI Automation fails or when visual error diagnosis is explicitly requested. Never captured routinely.
+
+### 2. Delivered Architecture & Subsystems
+- **UI Automation Manager (`bolt.windows.ui_automation.UIAutomationManager`)**:
+  - Connects to interactive desktop station (`user32.OpenDesktopW("Default", ...)` + `SetThreadDesktop`) before COM/UIA initialization to prevent thread isolation failures.
+  - Windows 11 UWP App Support: Resolves top-level `ApplicationFrameWindow` and child `CoreWindow`, handling minimized/suspended window states via `ShowWindow(hwnd, SW_RESTORE)`.
+  - Window Control Inspection (`inspect_window`): Extracts tree hierarchy, buttons, text fields, menu items, Automation IDs, and bounding boxes.
+  - Semantic Control Interaction (`click_element`): Invokes controls by Name or AutomationId directly via UI Automation patterns.
+  - Text Field Value Reading/Setting (`get_element_value`, `set_element_value`): Accesses `ValuePattern` or `TextPattern` directly without screen reading.
+  - Calculator Calculation (`calculate_in_calculator`): Restores Calculator, invokes number and operator buttons (`num1Button`, `multiplyButton`, etc.) via UI Automation, and reads the accessible output (`CalculatorResults`), extracting results (e.g., `125 * 25 = 3125`) with zero screenshots.
+- **Vision Engine (`bolt.windows.vision_engine.VisionEngine`)**:
+  - Screenshot-on-Demand only; validates `has_screen_changed()` via pixel hashing before analysis.
+  - Bounding-box capture (`capture_region`) constrained to specific windows, auto-resized to max 1280px for minimal RAM footprint.
+  - Local OCR (`run_ocr`) powered by `winocr` and native Windows 11 OCR, executed in a isolated thread pool to prevent asyncio loop collisions.
+  - Visual error diagnosis (`diagnose_visual_error`): Categorizes UI error dialogs (access denied, network failure, exceptions) using local OCR token classification.
+- **Hybrid Controller (`bolt.windows.hybrid_controller.HybridController`)**:
+  - Orchestrates the 5-tier priority hierarchy.
+  - Predictable tasks (launching apps, creating files, reading text, system telemetry) execute directly with zero visual overhead.
+  - Graceful fallback: If UI Automation fails to find a control, it automatically triggers Screenshot-on-Demand visual error diagnosis.
+- **Performance Benchmark Suite (`bolt.windows.performance_benchmark.PerformanceBenchmark`)**:
+  - Empirically measures execution time (ms), RAM delta (MB), CPU usage (%), and success rate across all 7 benchmark operations:
+    1. Open Notepad (Direct API)
+    2. Type text (Direct SendInput)
+    3. Read text (UI Automation)
+    4. Click button (UI Automation)
+    5. Capture screenshot (GDI capture)
+    6. Perform local OCR (Windows Media OCR)
+    7. Visual error diagnosis (Local Vision AI)
+- **Tool Registry Expansion (`bolt.tasks.tool_registry`)**:
+  - 7 new tools registered: `uia_inspect_window`, `uia_click_element`, `uia_get_element_value`, `uia_set_element_value`, `uia_calculate`, `ocr_screen_region`, `run_performance_benchmark`.
+- **Intent Dispatcher Routing (`bolt.windows.intent_dispatcher`)**:
+  - Direct routing for `calculate <expr>`, `compute <expr>`, `click the <name> button`, and `run performance benchmark`.
+
+---
+
+## 🧪 Phase 6 Empirical Verification Results (`tests/test_phase6_event_driven.py`)
+
+All 10 test cases covering Section 10 mandatory operations passed (**100% success**):
+
+| # | Operation / Requirement | Method Used | Screenshots Taken | Time (ms) | Status |
+|---|---|---|---|---|---|
+| 1 | Open Calculator | `direct_windows_api` | **False** (0) | **83.5 ms** | ✅ **PASSED** |
+| 2 | Calculate 125 × 25 (= 3125) | `ui_automation` | **False** (0) | **7,205.6 ms** | ✅ **PASSED** |
+| 3 | Open Notepad & Type Text | `keyboard_sendinput` | **False** (0) | **1,156.9 ms** | ✅ **PASSED** |
+| 4 | Create & Verify File | `direct_file_api` | **False** (0) | **33.9 ms** | ✅ **PASSED** |
+| 5 | Identify Save Button | `ui_automation` | **False** (0) | **128.6 ms** | ✅ **PASSED** |
+| 6 | Read Browser Page Title | `browser_dom` | **False** (0) | **1,011.6 ms** | ✅ **PASSED** |
+| 7 | Fallback on Inaccessible UI | `screenshot_on_demand_fallback` | **True** (1 on demand) | **11,509.2 ms** | ✅ **PASSED** |
+| 8 | Understand Visual Error | `local_ocr` | **Local Only** | **58.4 ms** | ✅ **PASSED** |
+| 9 | Performance Benchmark Suite | `all_comparative` | Benchmark Metrics | **326.7 ms (Direct Avg)** | ✅ **PASSED** |
+| 10 | Intent Dispatcher Event-Driven | `calculate_accessible` | **False** (0) | **6,431.0 ms** | ✅ **PASSED** |
+
+### Full Test Suite Matrix Across All Phases:
+```
+Ran 69 tests in 183.829s - OK (100% PASSED)
+```
+
+---
+
+## ⏭️ Upcoming Phase: Phase 7 (Voice Assistant Expansion)
+- Two-way voice conversation loop with offline wake-word detection.
+- Streaming SAPI TTS speech synthesis.
+- Audio input pipeline with local Whisper speech-to-text.

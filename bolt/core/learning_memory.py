@@ -331,3 +331,4 @@ def get_learning_memory() -> LearningMemory:
     if _LEARNING_MEMORY_INSTANCE is None:
         _LEARNING_MEMORY_INSTANCE = LearningMemory()
     return _LEARNING_MEMORY_INSTANCE
+

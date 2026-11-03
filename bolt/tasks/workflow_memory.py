@@ -51,13 +51,38 @@ class WorkflowMemory:
 
     def recall_workflow_by_query(self, query: str) -> Optional[Dict[str, Any]]:
         """Look up a previously successful workflow matching user's instruction or request."""
+        # 1. Direct exact or substring match in DB
         matches = self.db.search_workflows(query)
         if matches:
             return matches[0]
 
-        # Check for phrase match (e.g. "same process you used last time")
         all_wf = self.db.get_all_workflows()
-        if all_wf and any(k in query.lower() for k in ["same process", "last time", "repeat workflow"]):
+        if not all_wf:
+            return None
+
+        # 2. Keyword relevance scoring against all known workflows
+        import re
+        q_lower = query.lower()
+        tokens = set(re.findall(r"\b[a-zA-Z]{3,}\b", q_lower))
+        stop_words = {"the", "and", "for", "you", "used", "last", "time", "same", "process", "repeat", "workflow", "with", "from", "that", "this"}
+        meaningful_tokens = tokens - stop_words
+
+        best_wf = None
+        best_score = 0
+        for wf in all_wf:
+            name_words = set(re.findall(r"\b[a-zA-Z]{3,}\b", wf.get("name", "").lower()))
+            query_words = set(re.findall(r"\b[a-zA-Z]{3,}\b", wf.get("user_query", "").lower()))
+            target_words = (name_words | query_words) - stop_words
+            score = len(meaningful_tokens & target_words)
+            if score > best_score:
+                best_score = score
+                best_wf = wf
+
+        if best_wf and best_score > 0:
+            return best_wf
+
+        # 3. Fallback for generic phrase match (e.g. "same process you used last time")
+        if any(k in q_lower for k in ["same process", "last time", "repeat workflow"]):
             return all_wf[0]
 
         return None

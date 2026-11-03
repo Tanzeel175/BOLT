@@ -309,3 +309,4 @@ def get_input_controller() -> InputController:
     if _INPUT_CONTROLLER_INSTANCE is None:
         _INPUT_CONTROLLER_INSTANCE = InputController()
     return _INPUT_CONTROLLER_INSTANCE
+

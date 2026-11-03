@@ -4,7 +4,7 @@
 
 ---
 
-## 🎯 Current Milestone: Phase 5 – Intelligent Task Planning & Multitasking (COMPLETED)
+## 🎯 Current Milestone: Phase 6 – Event-Driven Computer Control & UI Automation (COMPLETED)
 
 ### Complete Implemented Capabilities:
 
@@ -48,16 +48,33 @@
 - 🛑 **Human-in-the-Loop Approval Gates**: Enforces strict approval gates on sensitive actions (email sending, file modifications, script execution) before continuing.
 - 🧠 **Workflow Memory & Reuse**: SQLite persistence in `workflows` table allowing BOLT to recall and re-execute successful past procedures (*"Do the same process you used last time to prepare my research summary"*).
 - 🖥️ **Task Activity Panel (PySide6)**: Collapsible activity dock with real-time progress bar (0–100%), interactive step checklist, and `Pause ⏸`, `Resume ▶`, `Cancel ⏹`, `Approve ✅`, `Reject ❌` controls.
-- 🎯 **Core Workflows Implemented**:
-  - **Workflow A (AI Research)**: Search web -> Collect sources -> AI summarize with citations.
-  - **Workflow B (Email Preparation)**: Draft email -> Display -> Approval gate -> Open Gmail -> Require explicit approval before sending.
-  - **Workflow C (Programming Assistance)**: Locate project -> Open in VS Code -> Run in sandbox -> AI error diagnosis -> Require approval before modifying code.
-  - **Workflow D (Document Processing)**: Locate document -> Read content -> Summarize -> Write separate file -> Verify file integrity.
 
 #### 6. Offline-First Intelligence & Real Computer Control
 - 🧠 **Ollama Local AI as Default Brain**: Connects to `http://127.0.0.1:11434` with recommended model `gemma4:e2b`. Zero cloud dependency for core computer actions.
 - 🛡️ **Zero Automatic Downloads & Zero Silent Cloud Fallback**: If the local model is not downloaded, BOLT informs the user with exact terminal instructions (`ollama run gemma4:e2b`) without downloading gigabytes behind the user's back or silently leaking queries to cloud APIs.
-- 🔌 **Fast Internet Detection & Graceful Offline Exit**: DNS socket probes detect internet disconnection in milliseconds. If online search is requested offline, BOLT immediately reports:
+- 🔌 **Fast Internet Detection & Graceful Offline Exit**: DNS socket probes detect internet disconnection in milliseconds. If online search is requested offline, BOLT immediately reports graceful notification.
+- ⚖️ **Mixed-Task Partial Completion (`PARTIALLY_COMPLETED`)**: For mixed tasks, offline search failure does not cancel local operations.
+- 💾 **Persistent Learning Memory**: 7 SQLite memory categories, user correction learning with prompt context injection, and LoRA fine-tuning JSONL dataset export.
+
+#### 7. Event-Driven Computer Control & UI Automation (Phase 6)
+- ⚡ **Zero Routine Screenshots**: Eliminates screenshot-heavy visual polling in favor of a 5-tier priority hierarchy:
+  1. Direct Windows APIs & Process Tools (Win32, ShellExecute, Direct File API).
+  2. Windows UI Automation & Accessibility APIs (control trees, `InvokePattern`, `ValuePattern`, `TextPattern`).
+  3. Keyboard Shortcuts & Win32 `SendInput` Unicode stream.
+  4. Local Windows Media OCR (`winocr` running 100% on CPU).
+  5. Screenshot-on-Demand & Local Vision AI (captured only when UI Automation fails or explicitly requested).
+- 🪟 **UI Automation Manager (`bolt.windows.ui_automation`)**:
+  - Interactive desktop thread attachment (`SetThreadDesktop`) preventing background isolation failures.
+  - Windows 11 UWP Application Frame resolution (`ApplicationFrameWindow` and `CoreWindow`).
+  - Semantic button invocation (`InvokePattern`, `TogglePattern`, `LegacyIAccessiblePattern`).
+  - Native Calculator control: calculates complex mathematical expressions (e.g., `125 * 25 = 3125`) with zero screenshots.
+- 👁️ **Vision Engine (`bolt.windows.vision_engine`)**:
+  - Screenshot-on-Demand with pixel difference verification (`has_screen_changed`).
+  - Native Windows Media OCR with thread-safe execution (no event-loop collisions).
+  - Local visual error diagnosis classifying error dialogs without cloud transmission.
+- 🏎️ **Performance Benchmark Suite (`bolt.windows.performance_benchmark`)**:
+  - Empirically measures time (ms), RAM delta (MB), CPU usage, and success rates across Direct APIs, UI Automation, and Vision operations.
+- 🛠️ **25 Registered System Tools (`bolt.tasks.tool_registry`)**: Fully registered tools covering system actions, browser control, UI automation, file ops, and local OCR.
   `"No internet connection detected. Online search is unavailable. Local BOLT functionality is still available."`
 - ⚖️ **Mixed-Task Partial Completion (`PARTIALLY_COMPLETED`)**: For mixed tasks (e.g. *"Open Calculator and search for AI news"*), offline search failure does not cancel local operations.
 - ⌨️ **Real Computer Control Tools (18 Tools)**: Win32 `SendInput` Unicode typing into active windows, key presses, hotkeys, screen capture, file read/write with OneDrive/Desktop alias resolution, and application lifecycle controls.
@@ -90,13 +107,14 @@ BOLT/
 │   ├── test_phase4_ui_interaction.py    # Phase 4 AI E2E test
 │   ├── test_phase5.py                   # Phase 5 Task Planning tests
 │   ├── test_phase5_ui_interaction.py    # Phase 5 UI E2E test
-│   └── test_offline_and_real_control.py # Offline-First, Ollama, & Real Control tests
+│   ├── test_offline_and_real_control.py # Offline-First, Ollama, & Real Control tests
+│   └── test_phase6_event_driven.py      # Phase 6 Event-Driven & UI Automation tests
 └── bolt/
     ├── config/           # Application constants & settings management
     ├── core/             # SQLite persistence, network manager, learning memory, logger
     ├── ai/               # OllamaProvider, GeminiProvider, OpenAIProvider, router, comparator
     ├── browser/          # Browser detector, Playwright controller, registry, reader, search
-    ├── windows/          # App discovery, lifecycle, input controller (SendInput), file manager
+    ├── windows/          # App discovery, lifecycle, SendInput, UIA, VisionEngine, HybridController
     ├── voice/            # Local Windows SAPI voice synthesis
     ├── ui/               # PySide6 desktop interface and components
     │   └── components/   # Header, Sidebar, ChatView, InputBar, TaskStatus, TaskActivityPanel
