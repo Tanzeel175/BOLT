@@ -71,6 +71,13 @@ class Settings:
         openai_model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip()
         openai_base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").strip()
 
+        # Offline-first principle: If a cloud provider is selected but has no API key,
+        # automatically prefer the local model (Ollama) so BOLT operates 100% locally.
+        if provider == PROVIDER_OPENAI and not openai_api_key:
+            provider = PROVIDER_OLLAMA
+        elif provider == PROVIDER_GEMINI and not gemini_api_key:
+            provider = PROVIDER_OLLAMA
+
         try:
             temperature = float(os.getenv("BOLT_TEMPERATURE", str(DEFAULT_TEMPERATURE)))
         except ValueError:

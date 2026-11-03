@@ -924,13 +924,17 @@ class WindowsIntentDispatcher:
         # ---------------- Phase 4: Switch AI Provider ----------------
         if any(k in lower_stripped for k in [
             "switch to gemini", "switch to openai", "switch to chatgpt",
-            "switch default provider", "switch provider", "switch to mock", "switch to local"
+            "switch default provider", "switch provider", "switch to mock",
+            "switch to local", "switch to ollama", "switch to gemma",
+            "switch to local model", "use local model", "use ollama",
+            "prefer local model", "switch to local ai"
         ]):
             from bolt.ai.provider_manager import get_provider_manager
             pm = get_provider_manager()
             target_p = (
                 "gemini" if "gemini" in lower_stripped
                 else "openai" if ("openai" in lower_stripped or "chatgpt" in lower_stripped)
+                else "ollama" if any(w in lower_stripped for w in ["ollama", "local", "gemma"])
                 else "mock"
             )
             ok, msg = pm.switch_default_provider(target_p)

@@ -214,8 +214,9 @@ class MainWindow(QMainWindow):
 
     def _sync_header_badge(self):
         """Update header pill based on active provider and model."""
-        provider = self.settings.provider
-        model = self.settings.current_model
+        active_p = self.ai_router.get_provider()
+        provider = active_p.provider_name
+        model = active_p.default_model
         if provider == "gemini" and not self.settings.gemini_api_key.strip():
             self.header_bar.update_model_badge("Gemini (No Key)", "Local Demo Mode")
         elif provider == "openai" and not self.settings.openai_api_key.strip():
@@ -410,9 +411,9 @@ class MainWindow(QMainWindow):
         if intent.raw_data and "provider_override" in intent.raw_data:
             provider_override = intent.raw_data["provider_override"]
 
-        active_provider_name = (provider_override or self.settings.provider).upper()
+        active_provider = self.ai_router.get_provider(provider_override)
         self.input_bar.set_busy(True)
-        self.status_bar.set_thinking(f"Thinking with {active_provider_name}...")
+        self.status_bar.set_thinking(f"Thinking with {active_provider.display_name}...")
 
         # Build ChatMessage history for AI model
         chat_history = [
