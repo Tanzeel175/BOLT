@@ -45,6 +45,15 @@ class NetworkManager:
         self._offline_simulation = is_offline
         logger.info(f"Offline simulation set to: {is_offline}")
 
+    def simulate_offline(self, is_offline: Optional[bool] = True) -> None:
+        """Alias for set_offline_simulation."""
+        self.set_offline_simulation(is_offline)
+
+    @property
+    def is_online(self) -> bool:
+        """Convenience property for checking internet connectivity."""
+        return self.is_internet_available()
+
     def is_internet_available(self, timeout: float = 1.5) -> bool:
         """
         Check if laptop has a working internet connection.

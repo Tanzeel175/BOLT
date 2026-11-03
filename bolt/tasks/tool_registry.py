@@ -26,6 +26,10 @@ from bolt.core.network_manager import get_network_manager
 from bolt.windows.ui_automation import get_ui_automation_manager
 from bolt.windows.hybrid_controller import get_hybrid_controller
 from bolt.windows.performance_benchmark import get_performance_benchmark
+from bolt.voice.tts_engine import get_tts_engine
+from bolt.voice.speech_recognizer import get_speech_recognizer
+from bolt.voice.wake_word import get_wake_word_detector
+from bolt.voice.voice_controller import get_voice_controller
 
 logger = get_logger("ToolRegistry")
 
@@ -773,6 +777,85 @@ class ToolRegistry:
                 "properties": {},
             },
             handler=lambda: get_performance_benchmark().run_all_benchmarks(),
+        )
+
+        # =====================================================================
+        # 8. OFFLINE VOICE INTERACTION TOOLS (Phase 7)
+        # =====================================================================
+        self.register_tool(
+            name="voice_speak",
+            description="Speak a response text aloud using offline TTS (SAPI / Piper).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to speak aloud.",
+                    },
+                },
+                "required": ["text"],
+            },
+            handler=lambda text: {"success": True, "spoken": get_tts_engine().speak(text)},
+        )
+
+        self.register_tool(
+            name="voice_stop_speaking",
+            description="Immediately interrupt and silence ongoing speech synthesis.",
+            parameters={"type": "object", "properties": {}},
+            handler=lambda: {"success": True, "interrupted": get_tts_engine().stop_speaking() or True},
+        )
+
+        self.register_tool(
+            name="voice_listen_command",
+            description="Listen for and transcribe a spoken voice command via local microphone.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "max_duration_sec": {
+                        "type": "number",
+                        "description": "Maximum listening duration in seconds.",
+                    },
+                },
+            },
+            handler=lambda max_duration_sec=6.0: {
+                "success": True,
+                "text": get_speech_recognizer().listen_command_push_to_talk(max_duration_sec=max_duration_sec),
+            },
+        )
+
+        self.register_tool(
+            name="voice_toggle_wake_word",
+            description="Enable or disable local wake-word ('Hey Bolt') background listening.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "enabled": {
+                        "type": "boolean",
+                        "description": "True to enable wake-word, False to disable.",
+                    },
+                },
+                "required": ["enabled"],
+            },
+            handler=lambda enabled: {
+                "success": True,
+                "wake_word_enabled": get_wake_word_detector().set_enabled(enabled) or get_wake_word_detector().is_enabled,
+            },
+        )
+
+        self.register_tool(
+            name="voice_get_status",
+            description="Get offline voice subsystem status, microphone list, and speech engine evaluations.",
+            parameters={"type": "object", "properties": {}},
+            handler=lambda: {
+                "success": True,
+                "status": get_voice_controller().status_summary,
+                "microphones": get_speech_recognizer().detect_microphones(),
+                "default_microphone": get_speech_recognizer().get_default_microphone(),
+                "voices": get_tts_engine().available_voices,
+                "speech_rate": get_tts_engine().get_speech_rate(),
+                "model_status": get_speech_recognizer().get_model_install_instructions(),
+                "engine_evaluations": get_speech_recognizer().evaluate_engines(),
+            },
         )
 
     def _read_text_file_handler(self, file_path: str) -> Dict[str, Any]:

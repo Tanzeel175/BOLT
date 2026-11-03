@@ -72,6 +72,21 @@ class AIWorker(QThread):
             self.finished.emit(err_resp)
 
 
+class VoiceListenWorker(QThread):
+    """Background worker for Push-to-Talk audio listening and transcription."""
+    finished = Signal(str, str)  # (transcribed_text, error)
+
+    def run(self):
+        try:
+            from bolt.voice import get_voice_controller
+            vc = get_voice_controller()
+            text = vc.listen_command(max_duration_sec=6.0)
+            self.finished.emit(text or "", "")
+        except Exception as e:
+            logger.exception("VoiceListenWorker encountered error.")
+            self.finished.emit("", str(e))
+
+
 class MainWindow(QMainWindow):
     """BOLT Main Desktop Interface Window."""
 
@@ -171,6 +186,7 @@ class MainWindow(QMainWindow):
 
         # Input submission
         self.input_bar.message_submitted.connect(self._handle_user_message)
+        self.input_bar.voice_requested.connect(self._on_voice_requested)
 
         # Task Activity Panel controls (Phase 5)
         self.task_panel.pause_requested.connect(self._on_task_pause_requested)
@@ -253,10 +269,12 @@ class MainWindow(QMainWindow):
         else:
             self.sidebar.set_conversations(conversations, active_id=self.current_conv_id)
 
-    def _handle_user_message(self, text: str):
+    def _handle_user_message(self, text: str, from_voice: bool = False):
         """Process user input, record in DB, update UI, and dispatch to Windows Engine or AI worker."""
         if not self.current_conv_id:
             self._start_new_chat()
+
+        self._last_from_voice = from_voice
 
         # 1. Store user message in SQLite
         self.db.add_message(
@@ -324,6 +342,12 @@ class MainWindow(QMainWindow):
                 self.status_bar.set_ready(f"Completed • {intent.title}")
             else:
                 self.status_bar.set_error(intent.title)
+
+            # Speak voice response if request came from voice
+            if from_voice:
+                from bolt.voice import get_voice_pipeline, get_voice_controller
+                spoken = get_voice_pipeline()._generate_spoken_feedback(text, intent)
+                get_voice_controller().speak_async(spoken)
             return
 
         # 5. Otherwise, pass to AI Generative Model
@@ -377,6 +401,11 @@ class MainWindow(QMainWindow):
             )
             self.status_bar.set_ready(f"Completed • Model: {model_used}")
             logger.info("AI response received and rendered successfully.")
+
+            # Speak AI response if query came from voice
+            if getattr(self, "_last_from_voice", False):
+                from bolt.voice import get_voice_controller
+                get_voice_controller().speak_async(content)
         else:
             err_msg = response.error or "Unknown error generating response."
             self.status_bar.set_error(err_msg)
@@ -463,3 +492,35 @@ class MainWindow(QMainWindow):
                 content=summary_md,
                 model="BOLT Task Planner",
             )
+
+    # ---------------- Phase 7: Push-to-Talk Voice Callbacks ----------------
+
+    def _on_voice_requested(self):
+        """User pressed Push-to-Talk button."""
+        from bolt.voice import get_voice_controller
+        vc = get_voice_controller()
+
+        if not vc.is_stt_available:
+            info = vc.get_model_status()
+            QMessageBox.information(
+                self,
+                "BOLT Voice Assistant (Offline STT)",
+                info["instructions"],
+            )
+            return
+
+        self.input_bar.set_recording(True)
+        self.status_bar.set_thinking("Listening for speech (Push-to-Talk)... Speak now.")
+        self.voice_worker = VoiceListenWorker(self)
+        self.voice_worker.finished.connect(self._on_voice_transcription_finished)
+        self.voice_worker.start()
+
+    def _on_voice_transcription_finished(self, text: str, error: str):
+        """Handle captured speech transcription result."""
+        self.input_bar.set_recording(False)
+        if text:
+            self.input_bar.set_text(text)
+            self.status_bar.set_ready(f"Heard: '{text}'")
+            self._handle_user_message(text, from_voice=True)
+        else:
+            self.status_bar.set_ready("Voice listening finished (no speech captured).")

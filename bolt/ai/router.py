@@ -43,6 +43,24 @@ class AIRouter:
 
         return response
 
+    def generate_text(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        provider_override: Optional[str] = None,
+    ) -> str:
+        """Convenience method to generate text response for a single prompt."""
+        resp = self.generate(
+            messages=[ChatMessage(role="user", content=prompt)],
+            system_prompt=system_prompt,
+            provider_override=provider_override,
+        )
+        return resp.content
+
+    def generate_response(self, prompt: str) -> str:
+        """Alias for generate_text."""
+        return self.generate_text(prompt)
+
     def stream(
         self,
         messages: List[ChatMessage],

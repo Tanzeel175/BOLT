@@ -4,7 +4,7 @@
 
 ---
 
-## 🎯 Current Milestone: Phase 6 – Event-Driven Computer Control & UI Automation (COMPLETED)
+## 🎯 Current Milestone: Phase 7 – Offline Voice Assistant for BOLT (COMPLETED)
 
 ### Complete Implemented Capabilities:
 
@@ -74,12 +74,30 @@
   - Local visual error diagnosis classifying error dialogs without cloud transmission.
 - 🏎️ **Performance Benchmark Suite (`bolt.windows.performance_benchmark`)**:
   - Empirically measures time (ms), RAM delta (MB), CPU usage, and success rates across Direct APIs, UI Automation, and Vision operations.
-- 🛠️ **25 Registered System Tools (`bolt.tasks.tool_registry`)**: Fully registered tools covering system actions, browser control, UI automation, file ops, and local OCR.
-  `"No internet connection detected. Online search is unavailable. Local BOLT functionality is still available."`
-- ⚖️ **Mixed-Task Partial Completion (`PARTIALLY_COMPLETED`)**: For mixed tasks (e.g. *"Open Calculator and search for AI news"*), offline search failure does not cancel local operations.
-- ⌨️ **Real Computer Control Tools (18 Tools)**: Win32 `SendInput` Unicode typing into active windows, key presses, hotkeys, screen capture, file read/write with OneDrive/Desktop alias resolution, and application lifecycle controls.
-- 💾 **Persistent Learning Memory**: 7 SQLite memory categories, user correction learning with prompt context injection, and LoRA fine-tuning JSONL dataset export.
-- 🗣️ **Local Windows Voice (TTS)**: Offline speech synthesis using Windows Native SAPI.SpVoice with zero cloud API dependencies.
+- 🛠️ **30 Registered System Tools (`bolt.tasks.tool_registry`)**: Fully registered tools covering system actions, browser control, UI automation, file ops, local OCR, and voice control.
+
+#### 8. Offline Voice Assistant (Phase 7)
+- 🎙️ **Hardware Audio Detection & VAD (`bolt.voice.speech_recognizer`)**:
+  - Automatically discovers microphone input devices via `sounddevice` and measures ambient background noise floor.
+  - Energy-based Voice Activity Detection (VAD) detects start of speech and trailing silence.
+- 🗣️ **Offline Speech-to-Text (STT)**:
+  - Powered locally by **Vosk** with zero cloud speech APIs.
+  - Faster-Whisper evaluated; Windows 11 WDAC policy restrictions documented.
+  - **Zero Auto-Download Policy**: Does not download large neural models silently; provides clear instructions for manual model installation.
+- 🔊 **Offline Text-to-Speech (TTS) (`bolt.voice.tts_engine`)**:
+  - Windows native SAPI synthesis with discovered English voices (`Microsoft Hazel Desktop - UK`, `Microsoft Zira Desktop - US`).
+  - Configurable speech rate (100–300 words/min), real-time speech interruptibility (`"Stop speaking"`), and echo-cancellation gating.
+  - Automatic spoken text sanitization (strips Markdown, URLs, and code blocks for concise verbal delivery).
+- 🔄 **Voice Interaction Pipeline (`bolt.voice.voice_pipeline`)**:
+  - Glues Microphone -> VAD -> STT -> IntentDispatcher -> ToolRegistry/TaskEngine -> Execution Verification -> TTS feedback.
+  - Operates using the **exact same task execution engine** as typed instructions (no separate voice-only hacks).
+  - Push-to-Talk as the reliable default with dynamic recording UI feedback.
+  - Optional local wake word detector (`"Hey Bolt"`).
+- 💬 **Continuous Multi-Turn Conversation Mode (`bolt.voice.conversation_mode`)**:
+  - Maintains active listening state for a configurable follow-up window (default 8s).
+  - Enables fluid back-and-forth commands without repeating the wake phrase (e.g., *"Open Calculator"* followed by *"Calculate 250 divided by 5"*).
+- 🛑 **Voice Safety & Approval Gates**:
+  - Automatically holds sensitive actions in voice approval state until the user speaks confirmation (*"yes"*, *"confirm"*).
 
 ---
 
@@ -93,6 +111,20 @@ BOLT/
 ├── pyproject.toml        # Project metadata
 ├── README.md             # Project documentation
 ├── DEVELOPMENT_PROGRESS.md # Phase-by-phase development tracker
+├── run.py                # Main application entry point
+├── data/
+│   └── bolt.db           # SQLite database (conversations, registry, workflows, tasks, memory)
+├── logs/
+│   └── bolt.log          # Application log file (rotating)
+└── bolt/
+    ├── ai/               # AI Providers (Gemini, OpenAI, Mock, Local Ollama, Multi-AI, Router)
+    ├── browser/          # Browser automation (Playwright, Tab reuse, Registry, Search)
+    ├── config/           # App settings and environment loader
+    ├── core/             # Database, Logger, Network manager, Error handling
+    ├── tasks/            # DAG Planner, Execution engine, Multitasking manager, Tool registry
+    ├── ui/               # PySide6 desktop interface (Main window, Activity dock, Input bar, Styles)
+    ├── voice/            # Phase 7 Voice subsystem (TTS engine, Speech recognizer, Wake word, Pipeline)
+    └── windows/          # Windows automation (Apps, Windows, Files, UI Automation, Vision, OCR)
 ├── run.py                # Main application entry point
 ├── data/
 │   └── bolt.db           # SQLite database (conversations, registry, workflows, tasks, memory)

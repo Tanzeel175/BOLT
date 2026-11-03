@@ -76,6 +76,45 @@ class MultitaskingManager:
     def get_active_worker(self, plan_id: str) -> Optional[TaskExecutionWorker]:
         return self._active_workers.get(plan_id)
 
+    def pause_execution(self, plan_id: Optional[str] = None) -> bool:
+        """Pause active task worker(s) or plan."""
+        paused_any = False
+        if plan_id and plan_id in self._active_workers:
+            self._active_workers[plan_id].pause_task()
+            return True
+        for worker in self._active_workers.values():
+            worker.pause_task()
+            paused_any = True
+        if self.last_active_plan and self.last_active_plan.status == TaskStatus.IN_PROGRESS:
+            self.last_active_plan.status = TaskStatus.PENDING
+            paused_any = True
+        return paused_any
+
+    def resume_execution(self, plan_id: Optional[str] = None) -> bool:
+        """Resume active task worker(s) or plan."""
+        resumed_any = False
+        if plan_id and plan_id in self._active_workers:
+            self._active_workers[plan_id].resume_task()
+            return True
+        for worker in self._active_workers.values():
+            worker.resume_task()
+            resumed_any = True
+        return resumed_any
+
+    def cancel_execution(self, plan_id: Optional[str] = None) -> bool:
+        """Cancel active task worker(s) or plan."""
+        cancelled_any = False
+        if plan_id and plan_id in self._active_workers:
+            self._active_workers[plan_id].cancel_task()
+            return True
+        for worker in self._active_workers.values():
+            worker.cancel_task()
+            cancelled_any = True
+        if self.last_active_plan and self.last_active_plan.status in (TaskStatus.IN_PROGRESS, TaskStatus.WAITING_APPROVAL):
+            self.last_active_plan.status = TaskStatus.CANCELLED
+            cancelled_any = True
+        return cancelled_any
+
     @staticmethod
     def format_plan_summary_markdown(plan: ExecutionPlan) -> str:
         """Format an execution report in clean GitHub-style Markdown."""

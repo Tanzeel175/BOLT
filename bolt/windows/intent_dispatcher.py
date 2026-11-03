@@ -375,9 +375,10 @@ class WindowsIntentDispatcher:
             return IntentResult(
                 is_windows_action=True,
                 action_type="web_search",
-                success=True,
+                success=search_res.get("success", False),
                 title=f"Search: {clean_search_query}",
-                content=search_res.get("summary_md", ""),
+                content=search_res.get("summary_md") or search_res.get("error", ""),
+                raw_data=search_res,
             )
 
         # ---------------- Phase 6: Direct UI Automation Calculator ----------------
@@ -469,6 +470,25 @@ class WindowsIntentDispatcher:
                         title=f"Opened {candidate.title()} Folder",
                         content=f"📁 **Opened Folder:** `{resolved_folder}`",
                     )
+
+        # ---------------- Create Text File Direct ----------------
+        create_file_match = re.match(
+            r"^create\s+(?:a\s+)?(?:new\s+)?(?:text\s+)?file(?:\s+(?:called|named)\s+([^\n]+?)|\s+([a-zA-Z0-9_\-\.]+\.[a-zA-Z0-9]+))?(?:\s+on\s+(?:my\s+)?([^\n]+))?$",
+            lower_stripped,
+        )
+        if create_file_match:
+            filename = (create_file_match.group(1) or create_file_match.group(2) or "").strip() or "notes.txt"
+            folder = (create_file_match.group(3) or "").strip() or "desktop"
+            folder = folder.rstrip(".?!").strip()
+            res = FileManager.create_text_file(filename, "", folder_alias=folder)
+            return IntentResult(
+                is_windows_action=True,
+                action_type="create_file",
+                success=res.get("success", True),
+                title="Create File",
+                content=res.get("message", "File created."),
+                raw_data=res,
+            )
 
         # ---------------- 5. Search / Find Files ----------------
         search_match = re.match(

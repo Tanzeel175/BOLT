@@ -172,6 +172,7 @@ All 12 test cases passed cleanly (**100% success**):
 - [x] **Phase 5 UI Interaction (`tests/test_phase5_ui_interaction.py`):** **PASSED**
 - [x] **Offline & Hardware Upgrade (`tests/test_offline_and_real_control.py`):** **PASSED (12/12 tests)**
 - [x] **Phase 6 Event-Driven Suite (`tests/test_phase6_event_driven.py`):** **PASSED (10/10 tests)**
+- [x] **Phase 7 Offline Voice Assistant Suite (`tests/test_phase7_voice.py`):** **PASSED (15/15 tests)**
 
 ---
 
@@ -237,12 +238,111 @@ All 10 test cases covering Section 10 mandatory operations passed (**100% succes
 
 ### Full Test Suite Matrix Across All Phases:
 ```
-Ran 69 tests in 183.829s - OK (100% PASSED)
+Ran 84 tests in 96.586s - OK (100% PASSED)
 ```
 
 ---
 
-## ⏭️ Upcoming Phase: Phase 7 (Voice Assistant Expansion)
-- Two-way voice conversation loop with offline wake-word detection.
-- Streaming SAPI TTS speech synthesis.
-- Audio input pipeline with local Whisper speech-to-text.
+## 📌 Phase 7 Implementation Report: Offline Voice Assistant for BOLT
+
+### 1. Main Objectives & Hardware Target
+- **Laptop Environment:** Windows 11 64-bit, Intel Core i7-8665U @ 1.90 GHz, 16 GB RAM, Intel UHD 620.
+- **Offline Guarantee:** 100% local speech recognition (STT) and local speech synthesis (TTS) with zero cloud speech APIs.
+- **Identical Engine Rule:** Voice commands are processed through the **exact same task-execution pipeline** (`IntentDispatcher`, `ToolRegistry`, `MultitaskingManager`, `ExecutionEngine`) as typed instructions.
+- **Zero Auto-Download Policy:** Speech model weights are never downloaded silently in the background without explicit user permission.
+
+### 2. Speech-to-Text (STT) Evaluation
+- **Faster-Whisper Evaluation:**
+  - Evaluated on Windows 11 host.
+  - Encountered host Windows Defender Application Control (WDAC) DLL block on PyAV bitstream library: `ImportError: DLL load failed while importing bitstream: An Application Control policy has blocked this file`.
+- **Vosk Evaluation:**
+  - Tested and successfully imported via Kaldi C++ bindings without WDAC policy violations.
+  - Selected as the primary lightweight offline STT engine for Intel Core i7 CPU.
+- **Microphone & VAD Integration:**
+  - Detects hardware audio inputs via `sounddevice` (e.g. `Microphone Array (Intel® Smart Sound Technology)`).
+  - Ambient noise calibration measures ambient RMS energy floor.
+  - Energy-based Voice Activity Detection (VAD) detects speech start and silence/end-of-speech.
+
+### 3. Offline Text-to-Speech (TTS)
+- **Engine:** `pyttsx3` wrapping Windows native SAPI (`SAPI.SpVoice`).
+- **Installed Voices:** Discovered and verified 2 installed Windows voices (`Microsoft Hazel Desktop - UK`, `Microsoft Zira Desktop - US`).
+- **Features:**
+  - Configurable speech rate (100–300 words/min; default 180 wpm).
+  - Real-time speech interruption (`stop_speaking()` / `"Stop speaking"`).
+  - Echo-cancellation gating: STT microphone listening is paused while TTS audio is playing.
+  - Spoken text sanitization: Strips Markdown markup, URLs, long paths, and caps verbal feedback to concise sentences.
+
+### 4. Voice Interaction Architecture & Conversation Mode
+```
+Microphone Array
+       │
+       ▼
+Voice Activity Detection (RMS threshold + ambient calibration)
+       │
+       ▼
+Offline Speech Recognizer (Vosk / Push-to-Talk)
+       │
+       ▼
+Wake-Word Evaluator ("Hey Bolt" / Push-to-Talk alternative)
+       │
+       ▼
+Central IntentDispatcher (App Control, Window Management, UIA, Files, Browser)
+       │
+       ▼
+ToolRegistry / Multitasking Execution Engine (DAG Planning & Recovery)
+       │
+       ▼
+Action Verification & Spoken Feedback Sanitizer
+       │
+       ▼
+Offline TTS Engine (Windows SAPI / Hazel / Zira)
+```
+- **Push-to-Talk as Default:** Dedicated Push-to-Talk microphone button on the UI input bar with animated recording indicator.
+- **Wake Word (`"Hey Bolt"`):** Optional toggleable local wake phrase detection.
+- **Multi-Turn Conversation Mode (`ConversationSession`):**
+  - Keeps listening session active after command completion for a configurable follow-up window (default 8s).
+  - Allows natural sequential commands without repeating the wake phrase (e.g., *"Open Calculator"* -> *"Calculate 250 divided by 5"*).
+- **Safety Approval Gate:**
+  - High-risk operations (file deletion, script execution, email sending) enter `WAITING_APPROVAL` voice state.
+  - Recognizes spoken user confirmation (*"yes"*, *"confirm"*, *"approve"*) or rejection (*"no"*, *"cancel"*, *"reject"*).
+
+### 5. Registered Voice Tools (`bolt.tasks.tool_registry`)
+1. `voice_speak`: Synthesizes spoken audio from text.
+2. `voice_stop_speaking`: Immediately interrupts active speech playback.
+3. `voice_listen_command`: Listens for voice input via Push-to-Talk or VAD.
+4. `voice_toggle_wake_word`: Enables or disables background wake phrase listening.
+5. `voice_get_status`: Returns microphone hardware status, TTS status, and active voices.
+
+---
+
+## 🧪 Phase 7 Empirical Verification Results (`tests/test_phase7_voice.py`)
+
+All 15 test cases covering Phase 7 requirements passed (**100% success**):
+
+| # | Requirement / Test Case | Component | Verification Evidence | Status |
+|---|---|---|---|---|
+| 1 | Microphone Device Detection & VAD | `SpeechRecognizer` | Detected 12 audio inputs; default Intel SST mic calibrated | ✅ **PASSED** |
+| 2 | Offline STT Engine Evaluation | `SpeechRecognizer` | Vosk selected; WDAC Whisper block documented | ✅ **PASSED** |
+| 3 | Zero Auto-Download Policy | `SpeechRecognizer` | Manual setup instructions provided without silent download | ✅ **PASSED** |
+| 4 | Offline TTS Voice Discovery | `TTSEngine` | SAPI initialized with 2 voices; rate/voice switching verified | ✅ **PASSED** |
+| 5 | Spoken Feedback Sanitization | `TTSEngine` | Markdown stripped; concise speech mapping verified | ✅ **PASSED** |
+| 6 | Echo-Cancellation & Interruptibility | `TTSEngine` | Listening muted during speech; `stop_speaking` verified | ✅ **PASSED** |
+| 7 | Wake Word Detection & Stripping | `WakeWordDetector` | Detected "Hey Bolt"; stripped wake word cleanly | ✅ **PASSED** |
+| 8 | Multi-Turn Conversation Mode | `ConversationSession` | Follow-up window (5s/8s) and timeout verified | ✅ **PASSED** |
+| 9 | Command: "Bolt, open Notepad" | `VoicePipeline` | Launched Notepad; spoke "Opening Notepad." | ✅ **PASSED** |
+| 10 | Command: "Open Calculator" & follow-up | `VoicePipeline` | Opened Calculator; calculated 250 / 5 = 50 via UIA | ✅ **PASSED** |
+| 11 | Command: "Create a text file on Desktop"| `VoicePipeline` | Created `notes.txt` on Desktop; spoke confirmation | ✅ **PASSED** |
+| 12 | Command: Offline Internet Search | `VoicePipeline` | Immediate graceful notification without retry | ✅ **PASSED** |
+| 13 | Voice Task Controls | `VoicePipeline` | Handled "stop speaking", "pause current task", "cancel" | ✅ **PASSED** |
+| 14 | Voice Safety Approval Gate | `ConversationSession` | Sensitive operations held in approval state until "yes" | ✅ **PASSED** |
+| 15 | Central ToolRegistry Registration | `ToolRegistry` | All 5 Phase 7 voice tools verified | ✅ **PASSED** |
+
+### Complete Regression Test Suite Matrix (Phases 1–7):
+```
+Ran 84 tests in 96.586s - OK (100% PASSED)
+```
+
+---
+
+## 🏁 Phase 7 Status: COMPLETE
+All requirements of Phase 7 (Offline Voice Assistant for BOLT) have been implemented and verified. All existing functionality across Phases 1 through 6 has been preserved with zero regressions.

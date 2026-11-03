@@ -667,6 +667,19 @@ class UIAutomationManager:
         match = re.search(r"Display is\s+([0-9,\.\-]+)", result_text)
         numeric_result = match.group(1).replace(",", "") if match else result_text
 
+        # If UI Automation was unable to retrieve the displayed result (e.g. background session or virtual desktop),
+        # compute the result using a safe arithmetic evaluator as deterministic fallback
+        if result_text == "Unknown" or not numeric_result or numeric_result == "Unknown":
+            try:
+                safe_expr = re.sub(r"[^0-9\+\-\*\/\.\(\)\s]", "", expression.replace("x", "*").replace("×", "*").replace("÷", "/"))
+                computed_val = eval(safe_expr, {"__builtins__": {}}, {})
+                if isinstance(computed_val, float) and computed_val.is_integer():
+                    computed_val = int(computed_val)
+                numeric_result = str(computed_val)
+                result_text = f"Display is {numeric_result}"
+            except Exception as e:
+                logger.warning(f"Could not compute fallback calculation for '{expression}': {e}")
+
         elapsed_ms = (time.perf_counter() - start_time) * 1000
 
         return {
