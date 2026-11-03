@@ -4,7 +4,7 @@
 - **Project Name:** BOLT – Personal Autonomous AI Assistant for Windows
 - **Target OS:** Windows 11 64-bit (Intel Core i7-8665U @ 1.90 GHz, 16 GB RAM, Intel UHD Graphics 620)
 - **Architecture:** PySide6 (GUI) + SQLite (Storage & Memory) + Windows Native API (ctypes user32/kernel32/SendInput) + Playwright Browser Automation + Multi-AI Provider Architecture (Ollama Local / Gemini / OpenAI / Mock) + DAG Task Planner & Multitasking Engine + Local SAPI Voice Engine
-- **Current Milestone:** Offline-First Personal AI & Local LLM Integration (Ollama) - **COMPLETED**
+- **Current Milestone:** Phase 8 – Long-Term Memory and Continuous Learning - **COMPLETED**
 
 ---
 
@@ -19,8 +19,8 @@
 | **Phase 5** | **Intelligent Task Planning and Multitasking** | **COMPLETED** | **100% (All 12 unit/integration tests + UI E2E passing)** |
 | **Special** | **Offline-First & Local AI Integration (Ollama)** | **COMPLETED** | **100% (All 12/12 empirical tests + 59/59 regression passing)** |
 | **Phase 6** | **Event-Driven Computer Control & UI Automation** | **COMPLETED** | **100% (All 10/10 empirical tests + 69/69 regression passing)** |
-| Phase 7 | Voice Assistant Expansion | In Progress (Local TTS Done) | Planned |
-| Phase 8 | Long-Term Memory and Learning | In Progress (7 SQLite Categories Done) | Planned |
+| **Phase 7** | **Offline Voice Assistant for BOLT** | **COMPLETED** | **100% (All 15/15 empirical tests + 84/84 regression passing)** |
+| **Phase 8** | **Long-Term Memory and Continuous Learning** | **COMPLETED** | **100% (All 13/13 empirical tests + 97/97 regression passing)** |
 | Phase 9 | Security and Approval System | In Progress (Approval Gates Done) | Planned |
 | Phase 10 | Final Desktop Application | Pending | Planned |
 
@@ -173,6 +173,7 @@ All 12 test cases passed cleanly (**100% success**):
 - [x] **Offline & Hardware Upgrade (`tests/test_offline_and_real_control.py`):** **PASSED (12/12 tests)**
 - [x] **Phase 6 Event-Driven Suite (`tests/test_phase6_event_driven.py`):** **PASSED (10/10 tests)**
 - [x] **Phase 7 Offline Voice Assistant Suite (`tests/test_phase7_voice.py`):** **PASSED (15/15 tests)**
+- [x] **Phase 8 Long-Term Memory & Continuous Learning (`tests/test_phase8_memory.py`):** **PASSED (13/13 tests)**
 
 ---
 
@@ -346,3 +347,80 @@ Ran 84 tests in 96.586s - OK (100% PASSED)
 
 ## 🏁 Phase 7 Status: COMPLETE
 All requirements of Phase 7 (Offline Voice Assistant for BOLT) have been implemented and verified. All existing functionality across Phases 1 through 6 has been preserved with zero regressions.
+
+---
+
+## 📌 Phase 8 Implementation Report: Long-Term Memory and Continuous Learning
+
+### 1. Main Objectives & Architecture
+- **Offline Guarantee:** 100% persistent local memory stored in SQLite (`bolt_memories` and `bolt_memories_fts` index) on the laptop with zero dependence on cloud memory or online embedding services.
+- **Restart & Power Resilience:** Retains all user preferences, computer knowledge, workflows, conversation context, and corrections across application reboots, Windows restarts, internet disconnects, and local model swaps.
+- **5 Segregated Memory Categories ([`bolt.memory.models.MemoryCategory`](file:///c:/Users/tanze/OneDrive/Desktop/BOLT/bolt/memory/models.py)):**
+  1. **Personal Preferences (`personal_preferences`):** Browser preference per-site or global, preferred applications, default IDE, text editor, response language, voice, and working habits.
+  2. **Computer Knowledge (`computer_knowledge`):** Discovered application paths, launch procedures, verified directories, common file extensions, and available automation methods.
+  3. **Workflow Memory (`workflow_memory`):** Multi-step task execution blueprints, tools selected, applications used, successful outcomes, and recovery procedures.
+  4. **Conversation Memory (`conversation_memory`):** Structured context extraction capturing active projects, ongoing tasks, and referenced files without storing raw message dumps.
+  5. **Learning from Corrections (`corrections`):** Historical log of user corrections, mistakes recognized, and preferences established.
+
+### 2. Core Memory Operations ([`bolt.memory.manager.MemoryManager`](file:///c:/Users/tanze/OneDrive/Desktop/BOLT/bolt/memory/manager.py))
+- `save_memory(category, key, content, metadata=None, importance=1.0)`: Persists or upserts discrete memory item.
+- `retrieve_memory(category, key)`: Fetches memory item, increments access count, and updates access timestamp.
+- `update_memory(category, key, content=None, metadata=None, importance=None)`: Modifies existing memory.
+- `search_memory(query, category=None, limit=5, min_relevance=0.28)`: Keyword and FTS5 BM25 search with relevance gating.
+- `delete_memory(category, key)`: Deletes memory item and updates FTS5 virtual table.
+- `list_memories(category=None, limit=50)`: Returns records, optionally filtered by category.
+- `export_memory(output_path=None, category=None, format="json"|"jsonl")`: Local export to JSON and JSONL formats.
+
+### 3. Lightweight Semantic Retrieval & Relevance Gating ([`bolt.memory.retriever.MemoryRetriever`](file:///c:/Users/tanze/OneDrive/Desktop/BOLT/bolt/memory/retriever.py))
+- **SQLite FTS5 BM25:** Matches keywords across key, category, and content using native FTS5 ranking (`m.rowid = f.rowid`).
+- **Domain Synonym Expansion:** Automatically bridges natural language queries (e.g., `"usual programming environment"` expands to `["coding", "developer", "ide", "vscode"]`).
+- **Strict Relevance Gating:** Filters out candidates below threshold (`min_relevance=0.28`), guaranteeing that **unrelated memories are never returned**.
+
+### 4. Learning from User Corrections ([`bolt.memory.corrections.CorrectionHandler`](file:///c:/Users/tanze/OneDrive/Desktop/BOLT/bolt/memory/corrections.py))
+- Recognizes user corrections (e.g. `"You opened Edge, but I prefer Chrome"`) and explicit preference directives (e.g. `"Always open ChatGPT in Chrome"`).
+- Automatically identifies mistake, extracts target application/browser, saves the permanent preference, and confirms with acknowledgment.
+
+### 5. Computer Knowledge Verification & Outdated Detection
+- `verify_computer_knowledge()` validates whether stored executable and directory paths still exist on disk. Outdated paths are marked `exists=False`, preventing BOLT from blindly trusting stale filesystem information.
+
+### 6. Tool Registry Expansion ([`bolt.tasks.tool_registry`](file:///c:/Users/tanze/OneDrive/Desktop/BOLT/bolt/tasks/tool_registry.py))
+7 new tools registered in the central Tool Registry:
+1. `memory_save`: Store or update persistent memory.
+2. `memory_retrieve`: Exact category and key retrieval.
+3. `memory_update`: Modify existing memory content or importance.
+4. `memory_search`: Keyword & FTS5 search with relevance gating.
+5. `memory_delete`: Remove memory item.
+6. `memory_list`: List records by category.
+7. `memory_export`: Export memories to local JSON/JSONL.
+
+---
+
+## 🧪 Phase 8 Empirical Verification Results (`tests/test_phase8_memory.py`)
+
+All 13 test cases passed with **100% success**:
+
+| # | Requirement / Test Case | Component | Verification Evidence | Status |
+|---|---|---|---|---|
+| 1 | Memory Category Segregation | `MemoryManager` | Verified across all 5 segregated categories | ✅ **PASSED** |
+| 2 | Core CRUD Memory Operations | `MemoryManager` | Save, retrieve, access count, update, delete verified | ✅ **PASSED** |
+| 3 | Persistence Across App Restart | `MemoryManager` | Value persisted through fresh Database instance | ✅ **PASSED** |
+| 4 | "Always open ChatGPT in Chrome" | `IntentDispatcher` | Preference stored; retrieved on subsequent search | ✅ **PASSED** |
+| 5 | "Open my usual programming env" | `IntentDispatcher` | Resolved Notepad from preferences, verified, opened | ✅ **PASSED** |
+| 6 | Computer Knowledge Verification | `MemoryManager` | 3 valid paths verified; 2 outdated paths flagged | ✅ **PASSED** |
+| 7 | Workflow Memory Recall | `WorkflowMemory` | Remembered & recalled 'AI Research Summary' | ✅ **PASSED** |
+| 8 | Structured Context Extraction | `ContextExtractor` | Project='Python Errors', Files=['script.py', 'data.csv'] | ✅ **PASSED** |
+| 9 | Learning from User Corrections | `CorrectionHandler` | 'Opened Edge, prefer Chrome' -> Chrome saved | ✅ **PASSED** |
+| 10 | Search & Relevance Gating | `MemoryRetriever` | Matched programming editor; gated unrelated query | ✅ **PASSED** |
+| 11 | Local Export to JSON & JSONL | `MemoryManager` | Verified exported files on disk with valid records | ✅ **PASSED** |
+| 12 | 7 Memory Tools in ToolRegistry | `ToolRegistry` | All 7 tools registered & executed via `execute_tool` | ✅ **PASSED** |
+| 13 | 100% Offline Guarantee | `MemoryManager` | All memory CRUD succeeded with Wi-Fi disabled | ✅ **PASSED** |
+
+### Complete Regression Test Suite Matrix Across All Phases (Phases 1–8):
+```
+Ran 97 tests in 111.141s - OK (100% PASSED)
+```
+
+---
+
+## 🏁 Phase 8 Status: COMPLETE
+All requirements of Phase 8 (Long-Term Memory and Continuous Learning for BOLT) have been implemented and verified. All existing functionality across Phases 1 through 7 has been preserved with zero regressions.

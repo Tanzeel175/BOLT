@@ -144,6 +144,19 @@ class BrowserController:
                 }
 
         # 2. Initialize browser
+        if not preferred_browser:
+            try:
+                from bolt.memory.manager import get_memory_manager
+                mem = get_memory_manager()
+                site_key = site_name.lower().replace(" ", "").replace(".com", "")
+                preferred_browser = (
+                    mem.get_user_preference(f"preferred_browser_for_{site_key}")
+                    or mem.get_user_preference(f"preferred_browser_for_{display_name.lower()}")
+                    or mem.get_user_preference("preferred_browser")
+                )
+            except Exception:
+                pass
+
         if not self._ensure_browser(preferred_browser):
             # Fallback to native OS browser open if Playwright fails
             try:

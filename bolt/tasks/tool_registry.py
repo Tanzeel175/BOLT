@@ -858,6 +858,136 @@ class ToolRegistry:
             },
         )
 
+        # =====================================================================
+        # 6. LONG-TERM MEMORY & CONTINUOUS LEARNING TOOLS (Phase 8)
+        # =====================================================================
+        from bolt.memory.manager import get_memory_manager
+        mem_mgr = get_memory_manager()
+
+        self.register_tool(
+            name="memory_save",
+            description="Save or update a persistent memory item across personal preferences, computer knowledge, workflows, conversation context, or corrections.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "category": {"type": "string", "description": "Memory category: 'personal_preferences', 'computer_knowledge', 'workflow_memory', 'conversation_memory', 'corrections'"},
+                    "key": {"type": "string", "description": "Unique key or name for this memory"},
+                    "content": {"type": "string", "description": "Content, value, or description to remember"},
+                    "importance": {"type": "number", "description": "Relative importance score from 0.1 to 2.0 (default 1.0)"},
+                },
+                "required": ["category", "key", "content"],
+            },
+            handler=lambda category, key, content, importance=1.0, metadata=None: {
+                "success": mem_mgr.save_memory(category=category, key=key, content=content, metadata=metadata, importance=importance),
+                "key": key,
+                "category": category,
+            },
+        )
+
+        self.register_tool(
+            name="memory_retrieve",
+            description="Retrieve an exact memory item by category and key.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "category": {"type": "string", "description": "Memory category"},
+                    "key": {"type": "string", "description": "Unique key"},
+                },
+                "required": ["category", "key"],
+            },
+            handler=lambda category, key: (
+                lambda item: {"success": True, "memory": item.to_dict()} if item else {"success": False, "error": f"Memory '{key}' not found in category '{category}'."}
+            )(mem_mgr.retrieve_memory(category=category, key=key)),
+        )
+
+        self.register_tool(
+            name="memory_update",
+            description="Update an existing memory item with new content, metadata, or importance.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "category": {"type": "string", "description": "Memory category"},
+                    "key": {"type": "string", "description": "Memory key"},
+                    "content": {"type": "string", "description": "Updated content or value"},
+                    "importance": {"type": "number", "description": "Updated importance score"},
+                },
+                "required": ["category", "key"],
+            },
+            handler=lambda category, key, content=None, importance=None, metadata=None: {
+                "success": mem_mgr.update_memory(category=category, key=key, content=content, metadata=metadata, importance=importance),
+                "key": key,
+            },
+        )
+
+        self.register_tool(
+            name="memory_search",
+            description="Search persistent memories using keyword matching and offline FTS5 BM25 retrieval.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query or natural language instruction"},
+                    "category": {"type": "string", "description": "Optional category filter"},
+                    "limit": {"type": "integer", "description": "Maximum results to return (default 5)"},
+                },
+                "required": ["query"],
+            },
+            handler=lambda query, category=None, limit=5: {
+                "success": True,
+                "query": query,
+                "matches": mem_mgr.search_memory(query=query, category=category, limit=limit),
+            },
+        )
+
+        self.register_tool(
+            name="memory_delete",
+            description="Delete a memory item from persistent storage.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "category": {"type": "string", "description": "Memory category"},
+                    "key": {"type": "string", "description": "Memory key to delete"},
+                },
+                "required": ["category", "key"],
+            },
+            handler=lambda category, key: {
+                "success": mem_mgr.delete_memory(category=category, key=key),
+                "key": key,
+            },
+        )
+
+        self.register_tool(
+            name="memory_list",
+            description="List persistent memories, optionally filtered by category.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "category": {"type": "string", "description": "Optional category to list"},
+                    "limit": {"type": "integer", "description": "Maximum number of records to return (default 50)"},
+                },
+            },
+            handler=lambda category=None, limit=50: {
+                "success": True,
+                "category": category,
+                "memories": mem_mgr.list_memories(category=category, limit=limit),
+            },
+        )
+
+        self.register_tool(
+            name="memory_export",
+            description="Export stored memories to a local file in JSON or JSONL format.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "output_path": {"type": "string", "description": "Optional custom export path on disk"},
+                    "category": {"type": "string", "description": "Optional category filter"},
+                    "format": {"type": "string", "description": "Export format: 'json' or 'jsonl' (default 'json')"},
+                },
+            },
+            handler=lambda output_path=None, category=None, format="json": mem_mgr.export_memory(
+                output_path=output_path, category=category, format=format
+            ),
+        )
+
     def _read_text_file_handler(self, file_path: str) -> Dict[str, Any]:
         """Read text from file, supporting PDF text extraction if pypdf/fitz is available or fallback."""
         p = Path(file_path).expanduser().resolve()

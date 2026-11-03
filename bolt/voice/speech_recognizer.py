@@ -292,3 +292,4 @@ def get_speech_recognizer() -> SpeechRecognizer:
     if _SPEECH_RECOGNIZER_INSTANCE is None:
         _SPEECH_RECOGNIZER_INSTANCE = SpeechRecognizer()
     return _SPEECH_RECOGNIZER_INSTANCE
+

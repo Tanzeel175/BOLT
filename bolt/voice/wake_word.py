@@ -68,3 +68,4 @@ def get_wake_word_detector() -> WakeWordDetector:
     if _WAKE_WORD_DETECTOR_INSTANCE is None:
         _WAKE_WORD_DETECTOR_INSTANCE = WakeWordDetector()
     return _WAKE_WORD_DETECTOR_INSTANCE
+

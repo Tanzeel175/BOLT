@@ -113,6 +113,12 @@ class LearningMemory:
                     (str(uuid.uuid4()), cat_str, clean_key, val_json, confidence, source, now, now),
                 )
             logger.info(f"Saved memory [{cat_str}]: '{clean_key}'")
+            # Sync to unified MemoryManager
+            try:
+                from bolt.memory.manager import get_memory_manager
+                get_memory_manager().save_memory(cat_str, clean_key, value, importance=confidence)
+            except Exception:
+                pass
             return True
         except Exception as e:
             logger.error(f"Error saving memory '{clean_key}': {e}")

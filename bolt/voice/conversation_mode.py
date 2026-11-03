@@ -102,3 +102,4 @@ def get_conversation_session() -> ConversationSession:
     if _CONVERSATION_SESSION_INSTANCE is None:
         _CONVERSATION_SESSION_INSTANCE = ConversationSession()
     return _CONVERSATION_SESSION_INSTANCE
+

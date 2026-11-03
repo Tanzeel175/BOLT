@@ -106,6 +106,105 @@ class WindowsIntentDispatcher:
         # Remove trailing period or question mark for pattern matching
         lower_stripped = lower_stripped.rstrip(".?!").strip()
 
+        # ---------------- Phase 8: Long-Term Memory & Continuous Learning ----------------
+        from bolt.memory.manager import get_memory_manager
+        mem = get_memory_manager()
+
+        # A. Track structured conversation context without storing raw message dumps
+        try:
+            mem.record_conversation_context(clean)
+        except Exception:
+            pass
+
+        # B. Handle user corrections and explicit preference directives
+        # Examples: "You opened Edge, but I prefer Chrome", "Always open ChatGPT in Chrome", "Set preferred IDE to VS Code"
+        corr_res = mem.handle_user_correction(clean)
+        if corr_res:
+            return IntentResult(
+                is_windows_action=True,
+                action_type="learned_preference",
+                success=True,
+                title="Preference Learned",
+                content=corr_res["message"],
+                raw_data=corr_res,
+            )
+
+        # C. Query stored preferences
+        if lower_stripped in ["what are my preferences", "show my preferences", "list my preferences", "my preferences", "show preferences"]:
+            prefs = mem.list_memories(category="personal_preferences")
+            if not prefs:
+                content = "You have no stored personal preferences yet."
+            else:
+                rows = [f"- **{p['key']}**: `{p['value']}`" for p in prefs]
+                content = "### 🧠 Your Stored Personal Preferences\n\n" + "\n".join(rows)
+            return IntentResult(
+                is_windows_action=True,
+                action_type="list_preferences",
+                success=True,
+                title="Personal Preferences",
+                content=content,
+            )
+
+        # D. Preference-Driven "Usual" Environment
+        # Example: "Open my usual programming environment", "Open my usual text editor", "Open my usual browser"
+        usual_match = re.match(
+            r"^(?:open|launch|start|run)\s+(?:my\s+)?usual\s+([a-zA-Z0-9_\-\s]+)$",
+            lower_stripped,
+        )
+        if usual_match:
+            target_kind = usual_match.group(1).strip().lower()
+            pref_app = None
+            if any(k in target_kind for k in ["programming", "coding", "code", "dev", "ide", "developer"]):
+                pref_app = mem.get_user_preference("preferred_programming_app") or mem.get_user_preference("preferred_ide")
+            elif any(k in target_kind for k in ["note", "notes", "text"]):
+                pref_app = mem.get_user_preference("preferred_notes_app") or mem.get_user_preference("preferred_text_editor")
+            elif any(k in target_kind for k in ["browser", "web"]):
+                pref_browser = mem.get_user_preference("preferred_browser") or "chrome"
+                res = self.browser_controller.open_url("about:blank", preferred_browser=pref_browser)
+                return IntentResult(
+                    is_windows_action=True,
+                    action_type="open_usual_environment",
+                    success=res["success"],
+                    title="Usual Browser",
+                    content=f"🌐 Opened your preferred browser: **{pref_browser}**.",
+                )
+
+            if not pref_app:
+                matched_prefs = mem.search_memory(target_kind, category="personal_preferences", limit=1)
+                if matched_prefs:
+                    pref_app = matched_prefs[0]["value"]
+
+            if pref_app:
+                # Verify that it is installed
+                resolved = self.app_controller.registry.resolve_application(pref_app)
+                launch_target = resolved["name"] if resolved else pref_app
+                app_res = self.app_controller.open_application(launch_target)
+                if app_res["success"]:
+                    return IntentResult(
+                        is_windows_action=True,
+                        action_type="open_usual_environment",
+                        success=True,
+                        title=f"Usual Environment: {pref_app}",
+                        content=f"💻 Identified your preferred {target_kind} ('{pref_app}') from stored preferences. Verified and opened successfully.",
+                        raw_data={"preferred_app": pref_app, "result": app_res},
+                    )
+                else:
+                    return IntentResult(
+                        is_windows_action=True,
+                        action_type="open_usual_environment",
+                        success=False,
+                        title=f"Usual Environment Not Found",
+                        content=f"⚠️ Your preferred application '{pref_app}' could not be opened: {app_res.get('error')}",
+                    )
+            else:
+                return IntentResult(
+                    is_windows_action=True,
+                    action_type="open_usual_environment",
+                    success=False,
+                    title="No Preference Stored",
+                    content=f"No stored preference found for 'usual {target_kind}'. Please establish your preference (e.g. 'Set my preferred programming app to VS Code').",
+                )
+
         # ---------------- 1. System Telemetry & Specs ----------------
         system_keywords = [
             "system info", "system spec", "hardware info", "computer spec",

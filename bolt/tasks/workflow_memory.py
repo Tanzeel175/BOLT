@@ -47,6 +47,20 @@ class WorkflowMemory:
             is_successful=1,
         )
         logger.info(f"Remembered workflow '{name}' (ID: {wf_id})")
+        try:
+            from bolt.memory.manager import get_memory_manager
+            get_memory_manager().remember_workflow(
+                name=name,
+                user_query=user_query,
+                plan_json=plan_json,
+                steps_summary=steps_summary,
+                apps_used=apps_used,
+                tools_used=tools_used,
+                result_summary=result_summary,
+                is_successful=True,
+            )
+        except Exception as e:
+            logger.debug(f"Could not mirror workflow to MemoryManager: {e}")
         return wf_id
 
     def recall_workflow_by_query(self, query: str) -> Optional[Dict[str, Any]]:

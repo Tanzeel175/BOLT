@@ -4,7 +4,7 @@
 
 ---
 
-## 🎯 Current Milestone: Phase 7 – Offline Voice Assistant for BOLT (COMPLETED)
+## 🎯 Current Milestone: Phase 8 – Long-Term Memory and Continuous Learning (COMPLETED)
 
 ### Complete Implemented Capabilities:
 
@@ -99,6 +99,22 @@
 - 🛑 **Voice Safety & Approval Gates**:
   - Automatically holds sensitive actions in voice approval state until the user speaks confirmation (*"yes"*, *"confirm"*).
 
+#### 9. Long-Term Memory and Continuous Learning (Phase 8)
+- 💾 **100% Offline SQLite Memory Architecture (`bolt.memory`)**:
+  - Fully local SQLite storage in `bolt_memories` table with zero external cloud memory dependencies or online embedding APIs.
+  - Retains all preferences, computer knowledge, workflows, and learned corrections across application closes, Windows restarts, internet disconnects, and local AI model swaps.
+- 🗃️ **5 Dedicated Memory Categories**:
+  1. `personal_preferences`: Preferred browser per-site or global (*"Always open ChatGPT in Chrome"*), default coding IDE, text editors, working directories, voice, and response style.
+  2. `computer_knowledge`: Discovered application paths, launch methods, verified directory locations, and automation procedures. Includes automated disk path verification (`verify_computer_knowledge()`) to detect moved or uninstalled applications.
+  3. `workflow_memory`: Stores multi-step task execution blueprints, tools selected, applications used, successful outcomes, and recovery procedures for instant reuse (*"Prepare my research summary using the same process as last time"*).
+  4. `conversation_memory`: Structured context extraction (`ConversationContextExtractor`) tracking active project names, ongoing tasks, and referenced files without saving raw conversational message dumps.
+  5. `corrections`: Automatic learning from user corrections (*"You opened Edge, but I prefer Chrome"*) and explicit directives (*"Always open ChatGPT in Chrome"*), updating permanent preferences with confirmation.
+- 🔍 **Lightweight Semantic Retrieval & Gating (`bolt.memory.retriever`)**:
+  - SQLite FTS5 BM25 full-text indexing (`bolt_memories_fts`) combined with domain-specific synonym expansion.
+  - Strict relevance gating (`min_relevance=0.28`) ensuring unrelated memories are never returned.
+- 🛠️ **7 Registered Memory Tools (`bolt.tasks.tool_registry`)**:
+  `memory_save`, `memory_retrieve`, `memory_update`, `memory_search`, `memory_delete`, `memory_list`, `memory_export` (bringing total registry tools to 37).
+
 ---
 
 ## 📁 Project Architecture
@@ -116,41 +132,29 @@ BOLT/
 │   └── bolt.db           # SQLite database (conversations, registry, workflows, tasks, memory)
 ├── logs/
 │   └── bolt.log          # Application log file (rotating)
-└── bolt/
-    ├── ai/               # AI Providers (Gemini, OpenAI, Mock, Local Ollama, Multi-AI, Router)
-    ├── browser/          # Browser automation (Playwright, Tab reuse, Registry, Search)
-    ├── config/           # App settings and environment loader
-    ├── core/             # Database, Logger, Network manager, Error handling
-    ├── tasks/            # DAG Planner, Execution engine, Multitasking manager, Tool registry
-    ├── ui/               # PySide6 desktop interface (Main window, Activity dock, Input bar, Styles)
-    ├── voice/            # Phase 7 Voice subsystem (TTS engine, Speech recognizer, Wake word, Pipeline)
-    └── windows/          # Windows automation (Apps, Windows, Files, UI Automation, Vision, OCR)
-├── run.py                # Main application entry point
-├── data/
-│   └── bolt.db           # SQLite database (conversations, registry, workflows, tasks, memory)
-├── logs/
-│   └── bolt.log          # Application log file (rotating)
-├── tests/
-│   ├── test_e2e_interaction.py          # Phase 1 UI E2E test
-│   ├── test_phase2.py                   # Phase 2 Windows control tests
-│   ├── test_phase3.py                   # Phase 3 browser tests
-│   ├── test_phase3_ui_interaction.py    # Phase 3 UI E2E test
-│   ├── test_phase4.py                   # Phase 4 AI integration tests
-│   ├── test_phase4_ui_interaction.py    # Phase 4 AI E2E test
-│   ├── test_phase5.py                   # Phase 5 Task Planning tests
-│   ├── test_phase5_ui_interaction.py    # Phase 5 UI E2E test
-│   ├── test_offline_and_real_control.py # Offline-First, Ollama, & Real Control tests
-│   └── test_phase6_event_driven.py      # Phase 6 Event-Driven & UI Automation tests
-└── bolt/
-    ├── config/           # Application constants & settings management
-    ├── core/             # SQLite persistence, network manager, learning memory, logger
-    ├── ai/               # OllamaProvider, GeminiProvider, OpenAIProvider, router, comparator
-    ├── browser/          # Browser detector, Playwright controller, registry, reader, search
-    ├── windows/          # App discovery, lifecycle, SendInput, UIA, VisionEngine, HybridController
-    ├── voice/            # Local Windows SAPI voice synthesis
-    ├── ui/               # PySide6 desktop interface and components
-    │   └── components/   # Header, Sidebar, ChatView, InputBar, TaskStatus, TaskActivityPanel
-    └── tasks/            # Models, Planner, DependencyManager, ExecutionEngine, Recovery, Memory
+├── bolt/
+│   ├── ai/               # AI Providers (Ollama, Gemini, OpenAI, Mock, Multi-AI, Router)
+│   ├── browser/          # Browser automation (Playwright, Tab reuse, Registry, Search)
+│   ├── config/           # App settings and environment loader
+│   ├── core/             # Database, Logger, Network manager, Error handling
+│   ├── memory/           # Phase 8 Long-Term Memory (Manager, Models, Retriever, FTS5, Corrections)
+│   ├── tasks/            # DAG Planner, Execution engine, Multitasking manager, Tool registry
+│   ├── ui/               # PySide6 desktop interface (Header, ChatView, InputBar, ActivityDock)
+│   ├── voice/            # Phase 7 Voice subsystem (TTS engine, Speech recognizer, Wake word, Pipeline)
+│   └── windows/          # Windows automation (Apps, Windows, Files, UI Automation, Vision, OCR)
+└── tests/
+    ├── test_e2e_interaction.py          # Phase 1 UI E2E test
+    ├── test_phase2.py                   # Phase 2 Windows control tests
+    ├── test_phase3.py                   # Phase 3 browser tests
+    ├── test_phase3_ui_interaction.py    # Phase 3 UI E2E test
+    ├── test_phase4.py                   # Phase 4 AI integration tests
+    ├── test_phase4_ui_interaction.py    # Phase 4 AI E2E test
+    ├── test_phase5.py                   # Phase 5 Task Planning tests
+    ├── test_phase5_ui_interaction.py    # Phase 5 UI E2E test
+    ├── test_offline_and_real_control.py # Offline-First, Ollama, & Real Control tests
+    ├── test_phase6_event_driven.py      # Phase 6 Event-Driven & UI Automation tests
+    ├── test_phase7_voice.py             # Phase 7 Voice Assistant tests
+    └── test_phase8_memory.py            # Phase 8 Long-Term Memory & Learning tests
 ```
 
 ---
@@ -178,11 +182,11 @@ Run with the virtual environment Python:
 
 ### 4. Running Automated Tests
 ```powershell
-# Run the complete test suite (59 tests):
+# Run the complete test suite (97 tests across all 8 phases):
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"
 
-# Run Offline-First and Real Control verification (12 tests):
-.\.venv\Scripts\python.exe -m unittest tests/test_offline_and_real_control.py
+# Run Phase 8 Long-Term Memory tests (13 tests):
+.\.venv\Scripts\python.exe -m unittest tests/test_phase8_memory.py
 ```
 
 ---
@@ -193,8 +197,8 @@ Run with the virtual environment Python:
 - [x] **Phase 3:** Browser and Website Intelligence
 - [x] **Phase 4:** AI Application Integration
 - [x] **Phase 5:** Intelligent Task Planning and Multitasking
-- [ ] **Phase 6:** Visual Computer Use
-- [ ] **Phase 7:** Voice Assistant
-- [ ] **Phase 8:** Long-Term Memory and Learning
+- [x] **Phase 6:** Visual Computer Use & Event-Driven Control
+- [x] **Phase 7:** Offline Voice Assistant
+- [x] **Phase 8:** Long-Term Memory and Continuous Learning
 - [ ] **Phase 9:** Security and Approval System
 - [ ] **Phase 10:** Final Desktop Application
