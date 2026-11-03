@@ -182,3 +182,4 @@ class ExtractedContext:
             "summary": self.summary,
             "timestamp": self.timestamp,
         }
+

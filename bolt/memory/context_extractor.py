@@ -91,3 +91,4 @@ class ConversationContextExtractor:
 
         ctx.summary = " • ".join(parts) if parts else user_message[:100]
         return ctx
+
