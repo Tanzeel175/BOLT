@@ -21,3 +21,4 @@ if exist ".venv\Scripts\python.exe" (
 
 :: Fallback to system python
 python run.py %*
+

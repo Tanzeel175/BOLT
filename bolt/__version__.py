@@ -9,3 +9,4 @@ __author__ = "BOLT Systems"
 __organization__ = "BOLT Systems"
 __copyright__ = "Copyright © 2026 BOLT Systems"
 __description__ = "Personal Autonomous AI Assistant for Windows 11"
+

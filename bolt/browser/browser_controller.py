@@ -114,23 +114,29 @@ class BrowserController:
         logger.info(f"Open URL requested: '{query_or_url}'")
         clean_input = query_or_url.strip()
 
-        # 1. Resolve in Website Registry
-        site_record = self.registry.resolve_website(clean_input)
-        if site_record:
-            target_url = site_record["url"]
-            display_name = site_record.get("display_name", site_record["name"])
-            site_name = site_record["name"]
+        # Handle virtual browser target (e.g. "browser", "my browser", "web browser")
+        if clean_input.lower() in ("browser", "my browser", "the browser", "web browser", "internet"):
+            target_url = "https://www.google.com/"
+            display_name = "Web Browser"
+            site_name = "browser"
         else:
-            # Check if it is a valid URL
-            if not self.registry.is_valid_url(clean_input):
-                return {
-                    "success": False,
-                    "error": f"'{clean_input}' is neither a known website nor a valid web URL.",
-                    "url": clean_input,
-                }
-            target_url = self.registry.normalize_url(clean_input)
-            display_name = urlparse(target_url).netloc
-            site_name = display_name
+            # 1. Resolve in Website Registry
+            site_record = self.registry.resolve_website(clean_input)
+            if site_record:
+                target_url = site_record["url"]
+                display_name = site_record.get("display_name", site_record["name"])
+                site_name = site_record["name"]
+            else:
+                # Check if it is a valid URL
+                if not self.registry.is_valid_url(clean_input):
+                    return {
+                        "success": False,
+                        "error": f"'{clean_input}' is neither a known website nor a valid web URL.",
+                        "url": clean_input,
+                    }
+                target_url = self.registry.normalize_url(clean_input)
+                display_name = urlparse(target_url).netloc
+                site_name = display_name
 
         # Check connectivity for external web addresses
         if not any(target_url.startswith(p) for p in ["http://localhost", "http://127.0.0.1", "file://"]):

@@ -105,7 +105,14 @@ class DependencyManager:
                 return text
             if attr:
                 if isinstance(dep_step.result, dict):
-                    return dep_step.result.get(attr, text)
+                    if attr in dep_step.result:
+                        return dep_step.result[attr]
+                    for fb in ("content", "result", "summary", "text", "message"):
+                        if fb in dep_step.result:
+                            return dep_step.result[fb]
+                    return text
+                elif isinstance(dep_step.result, str) and attr in ("content", "result", "summary", "text"):
+                    return dep_step.result
                 elif hasattr(dep_step.result, attr):
                     return getattr(dep_step.result, attr, text)
             return dep_step.result
@@ -120,7 +127,15 @@ class DependencyManager:
             replacement = ""
             if dep_step and dep_step.result is not None:
                 if attr and isinstance(dep_step.result, dict):
-                    replacement = str(dep_step.result.get(attr, ""))
+                    val = dep_step.result.get(attr)
+                    if val is None:
+                        for fb in ("content", "result", "summary", "text", "message"):
+                            if fb in dep_step.result:
+                                val = dep_step.result[fb]
+                                break
+                    replacement = str(val or "")
+                elif attr and isinstance(dep_step.result, str) and attr in ("content", "result", "summary", "text"):
+                    replacement = dep_step.result
                 elif attr and hasattr(dep_step.result, attr):
                     replacement = str(getattr(dep_step.result, attr, ""))
                 else:

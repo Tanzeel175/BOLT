@@ -421,10 +421,41 @@ class ToolRegistry:
                         "type": "boolean",
                         "description": "Whether overwriting an existing file is permitted.",
                     },
+                    "folder_alias": {
+                        "type": "string",
+                        "description": "Optional destination folder alias (e.g. 'workspace', 'desktop', 'documents').",
+                    },
                 },
                 "required": ["file_path", "content"],
             },
             handler=self._write_text_file_handler,
+        )
+
+        self.register_tool(
+            name="get_recent_files",
+            description="Find the most recently modified or created files in a folder (e.g. downloads, workspace, desktop).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "folder_alias": {
+                        "type": "string",
+                        "description": "Folder to inspect ('downloads', 'desktop', 'documents', 'workspace').",
+                    },
+                    "extension": {
+                        "type": "string",
+                        "description": "Optional file extension filter (e.g. '.pdf', '.py', '.txt').",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of recent files to return.",
+                    },
+                },
+            },
+            handler=lambda folder_alias="downloads", extension="", limit=5: {
+                "success": True,
+                "folder": folder_alias,
+                "files": FileManager.get_recent_files(folder_alias=folder_alias, extension=extension or None, limit=limit),
+            },
         )
 
         self.register_tool(
@@ -1162,15 +1193,20 @@ class ToolRegistry:
             return {"success": False, "error": f"Failed reading file: {e}"}
 
     def _write_text_file_handler(
-        self, file_path: str, content: str, allow_overwrite: bool = False
+        self, file_path: str, content: str, allow_overwrite: bool = False, folder_alias: str = ""
     ) -> Dict[str, Any]:
-        """Safely write text to file, preventing accidental overwrites."""
+        """Safely write text to file, preventing accidental overwrites and supporting folder aliases."""
         raw_p = Path(file_path).expanduser()
         if not raw_p.is_absolute() and len(raw_p.parts) == 1:
-            desktop = FileManager.resolve_folder_alias("desktop")
-            p = (desktop / file_path).resolve() if desktop else raw_p.resolve()
+            target_folder = FileManager.resolve_folder_alias(folder_alias or "desktop")
+            if target_folder:
+                target_folder.mkdir(parents=True, exist_ok=True)
+                p = (target_folder / file_path).resolve()
+            else:
+                p = raw_p.resolve()
         else:
             p = raw_p.resolve()
+            p.parent.mkdir(parents=True, exist_ok=True)
 
         if p.exists() and not allow_overwrite:
             # Generate non-conflicting filename

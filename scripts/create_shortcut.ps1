@@ -78,3 +78,4 @@ if ($StartMenu) {
 }
 
 Write-Host "`nBOLT shortcut installation complete." -ForegroundColor Green
+

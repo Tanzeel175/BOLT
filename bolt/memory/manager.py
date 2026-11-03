@@ -472,6 +472,8 @@ class MemoryManager:
         clean_key = preference_name.strip().lower()
         return self.save_memory(MemoryCategory.PERSONAL_PREFERENCES, clean_key, value)
 
+    save_user_preference = set_user_preference
+
     def get_user_preference(self, preference_name: str, default: Any = None) -> Any:
         """Retrieve a stored personal preference."""
         clean_key = preference_name.strip().lower()

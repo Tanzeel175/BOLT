@@ -47,11 +47,15 @@ class CorrectionHandler:
             re.IGNORECASE,
         ),
         re.compile(
-            r"^(?:from\s+now\s+on\s+)?(?:set\s+my\s+)?preferred\s+([a-zA-Z0-9_\-\.\s]+?)\s+(?:is|to|as)\s+([a-zA-Z0-9_\-\.\s]+?)[\.\?!]?$",
+            r"^(?:remember\s+(?:that\s+)?|from\s+now\s+on\s+|please\s+remember\s+)?(?:set\s+my\s+)?(?:my\s+)?preferred\s+([a-zA-Z0-9_\-\.\s]+?)\s+(?:is|to|as)\s+([a-zA-Z0-9_\-\.\s:\\/]+)[\.\?!]?$",
             re.IGNORECASE,
         ),
         re.compile(
-            r"^i\s+prefer\s+([a-zA-Z0-9_\-\.\s]+?)\s+for\s+([a-zA-Z0-9_\-\.\s]+?)[\.\?!]?$",
+            r"^(?:remember\s+(?:that\s+)?|please\s+remember\s+)?(?:i\s+)?(?:prefer|like)\s+([a-zA-Z0-9_\-\.\s]+?)\s+(?:for|as|over)\s+([a-zA-Z0-9_\-\.\s]+?)[\.\?!]?$",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"^(?:remember\s+(?:that\s+)?|set\s+)?(?:my\s+)?workspace(?:\s+location|\s+folder|\s+path|\s+directory)?\s+(?:is\s+at|is\s+in|is|to|at)\s+([a-zA-Z0-9_\-\.\s:\\/]+)[\.\?!]?$",
             re.IGNORECASE,
         ),
     ]
@@ -63,14 +67,18 @@ class CorrectionHandler:
         c_lower = corrected.lower().strip()
         hint_lower = context_hint.lower().strip()
 
+        # Workspace location
+        if "workspace" in w_lower or "workspace" in c_lower or "workspace" in hint_lower:
+            return "workspace_location"
+
         # Known web browsers
         browsers = ["chrome", "google chrome", "msedge", "edge", "brave", "firefox", "opera"]
-        if any(b in w_lower or b in c_lower for b in browsers):
+        if any(b in w_lower or b in c_lower for b in browsers) or "browser" in hint_lower or "browser" in w_lower:
             if "chatgpt" in hint_lower:
                 return "preferred_browser_for_chatgpt"
             if "gemini" in hint_lower:
                 return "preferred_browser_for_gemini"
-            if hint_lower:
+            if hint_lower and "browser" not in hint_lower:
                 clean_target = re.sub(r"[^a-zA-Z0-9]", "", hint_lower)
                 return f"preferred_browser_for_{clean_target}"
             return "preferred_browser"
@@ -144,8 +152,14 @@ class CorrectionHandler:
                     }
                 elif i == 1:  # "preferred X is Y"
                     target = match.group(1).strip()
-                    choice = match.group(2).strip()
-                    pref_key = f"preferred_{re.sub(r'[^a-zA-Z0-9_]', '_', target.lower()).strip('_')}"
+                    choice = match.group(2).rstrip(".?!;:").strip()
+                    if "browser" in target.lower():
+                        pref_key = "preferred_browser"
+                        choice = choice.lower()
+                    elif "workspace" in target.lower():
+                        pref_key = "workspace_location"
+                    else:
+                        pref_key = f"preferred_{re.sub(r'[^a-zA-Z0-9_]', '_', target.lower()).strip('_')}"
                     return {
                         "is_correction": True,
                         "is_directive": True,
@@ -156,7 +170,7 @@ class CorrectionHandler:
                         "message": f"Understood. Your preferred {target} is now set to '{choice}'.",
                     }
                 elif i == 2:  # "i prefer Y for X"
-                    choice = match.group(1).strip()
+                    choice = match.group(1).rstrip(".?!;:").strip()
                     target = match.group(2).strip()
                     pref_key = self.identify_preference_key("", choice, context_hint=target)
                     return {
@@ -167,6 +181,18 @@ class CorrectionHandler:
                         "target": target,
                         "preference_key": pref_key,
                         "message": f"Preference saved: '{choice}' will be used for '{target}'.",
+                    }
+                elif i == 3:  # "my workspace is at X"
+                    raw_choice = match.group(1).strip()
+                    choice = re.sub(r"^(?:at|to|in)\s+", "", raw_choice, flags=re.IGNORECASE).rstrip(".?!;:").strip()
+                    return {
+                        "is_correction": True,
+                        "is_directive": True,
+                        "wrong": "",
+                        "corrected": choice,
+                        "target": "workspace",
+                        "preference_key": "workspace_location",
+                        "message": f"Workspace location saved: '{choice}'. Future workspace files will be organized here.",
                     }
 
         return None

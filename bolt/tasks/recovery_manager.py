@@ -63,10 +63,16 @@ class TaskRecoveryManager:
                 step.input_params["provider"] = "bing"
                 return True, "Switching web search engine fallback to Bing."
 
-        # B. AI Provider Fallback: Gemini -> OpenAI -> Mock
+        # B. AI Provider Fallback: Gemini -> OpenAI -> Ollama -> Mock
         elif step.tool_name == "generate_ai_response":
             current_ai = step.input_params.get("provider", "")
-            if current_ai != "mock":
+            if current_ai in ("gemini", "openai"):
+                step.input_params["provider"] = "ollama"
+                return True, "Switching AI generation fallback to Local Ollama Brain."
+            elif current_ai == "ollama":
+                step.input_params["provider"] = "mock"
+                return True, "Switching AI generation fallback to Local Mock Engine."
+            elif current_ai != "mock":
                 step.input_params["provider"] = "mock"
                 return True, "Switching AI generation fallback to Local Mock Engine."
 
@@ -76,5 +82,15 @@ class TaskRecoveryManager:
                 step.input_params["broad_search"] = True
                 step.input_params["max_results"] = 20
                 return True, "Broadening file search across user home directory."
+
+        # D. Application Launch Fallback: uninstalled IDE or browser fallback
+        elif step.tool_name == "open_application":
+            app_req = step.input_params.get("app_name", "").lower()
+            if any(b in app_req for b in ["chrome", "brave", "firefox"]) and app_req != "msedge":
+                step.input_params["app_name"] = "Microsoft Edge"
+                return True, "Target browser not found; falling back to Microsoft Edge."
+            elif any(e in app_req for e in ["code", "vscode", "pycharm", "sublime"]) and app_req != "notepad":
+                step.input_params["app_name"] = "Notepad"
+                return True, "Target code editor not installed; falling back to Windows Notepad."
 
         return False, None

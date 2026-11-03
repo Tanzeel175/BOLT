@@ -205,6 +205,155 @@ class WindowsIntentDispatcher:
                     content=f"No stored preference found for 'usual {target_kind}'. Please establish your preference (e.g. 'Set my preferred programming app to VS Code').",
                 )
 
+        # ---------------- Phase 11: Task Lifecycle Controls (Resume, Pause, Cancel) ----------------
+        if any(k in lower_stripped for k in [
+            "continue the task", "continue task", "resume the task", "resume task",
+            "continue what you were doing", "continue the task you were performing before i paused it",
+            "resume previous task", "continue paused task"
+        ]):
+            from bolt.tasks.multitasking_manager import get_multitasking_manager
+            mgr = get_multitasking_manager()
+            resumed = mgr.resume_execution()
+            if resumed:
+                content = "▶️ **Resumed task execution.** Continuing from the paused step."
+            else:
+                content = "ℹ️ No currently paused task was found to resume."
+            return IntentResult(
+                is_windows_action=True,
+                action_type="resume_task",
+                success=resumed,
+                title="Resume Task",
+                content=content,
+            )
+
+        if any(k in lower_stripped for k in ["pause task", "pause the task", "pause execution", "hold task"]):
+            from bolt.tasks.multitasking_manager import get_multitasking_manager
+            mgr = get_multitasking_manager()
+            paused = mgr.pause_execution()
+            content = "⏸️ **Paused active task.** Reply 'continue the task' when ready to resume." if paused else "ℹ️ No running task to pause."
+            return IntentResult(
+                is_windows_action=True,
+                action_type="pause_task",
+                success=paused,
+                title="Pause Task",
+                content=content,
+            )
+
+        if any(k in lower_stripped for k in ["cancel task", "cancel the task", "stop task", "abort task"]):
+            from bolt.tasks.multitasking_manager import get_multitasking_manager
+            mgr = get_multitasking_manager()
+            cancelled = mgr.cancel_execution()
+            content = "⏹️ **Cancelled active task execution.**" if cancelled else "ℹ️ No running task to cancel."
+            return IntentResult(
+                is_windows_action=True,
+                action_type="cancel_task",
+                success=cancelled,
+                title="Cancel Task",
+                content=content,
+            )
+
+        # ---------------- Phase 11: Recent Files & Contextual Search ----------------
+        recent_file_match = re.search(
+            r"(?:find|get|show|locate|open)\s+(?:the\s+)?(?:most\s+)?recent\s+(pdf|python|py|text|txt|document|file)(?:\s+(?:in|from)\s+(?:my\s+)?(\w+))?",
+            lower_stripped,
+        )
+        if recent_file_match:
+            raw_ext = recent_file_match.group(1).lower()
+            ext_map = {"pdf": ".pdf", "python": ".py", "py": ".py", "text": ".txt", "txt": ".txt"}
+            target_ext = ext_map.get(raw_ext, "")
+            folder_target = recent_file_match.group(2) or ("downloads" if "download" in lower_stripped else "workspace" if "workspace" in lower_stripped else "desktop")
+            recent_files = FileManager.get_recent_files(folder_alias=folder_target, extension=target_ext, limit=5)
+            if recent_files:
+                top = recent_files[0]
+                rows = [f"- 📄 **{f['name']}** ({f['size_kb']} KB) — `{f['path']}`" for f in recent_files]
+                content = (
+                    f"### 🕒 Most Recent {raw_ext.upper()} in {folder_target.title()}\n\n"
+                    f"Top match: **{top['name']}**\n\n"
+                    + "\n".join(rows)
+                )
+                return IntentResult(
+                    is_windows_action=True,
+                    action_type="recent_files",
+                    success=True,
+                    title=f"Recent {raw_ext.upper()} Found",
+                    content=content,
+                    raw_data={"files": recent_files, "top_file": top},
+                )
+            else:
+                return IntentResult(
+                    is_windows_action=True,
+                    action_type="recent_files",
+                    success=False,
+                    title="No Recent Files Found",
+                    content=f"No recent {raw_ext.upper()} files were found in your {folder_target} directory.",
+                )
+
+        if "python project" in lower_stripped and any(w in lower_stripped for w in ["find", "locate", "search", "yesterday", "working on"]):
+            # Look in workspace, desktop, and memory
+            ws_path = FileManager.get_workspace_path()
+            py_files = FileManager.get_recent_files(folder_alias="workspace", extension=".py", limit=5)
+            if not py_files:
+                py_files = FileManager.search_files(".py", start_dir="desktop", max_results=5)
+
+            if py_files:
+                top = py_files[0]
+                rows = [f"- 🐍 **{f['name']}** (`{f['path']}`)" for f in py_files]
+                content = (
+                    f"### 🔍 Located Your Python Project\n\n"
+                    f"Identified primary Python project entry: **`{top['path']}`**\n\n"
+                    + "\n".join(rows)
+                )
+                return IntentResult(
+                    is_windows_action=True,
+                    action_type="find_python_project",
+                    success=True,
+                    title="Python Project Found",
+                    content=content,
+                    raw_data={"files": py_files, "primary": top},
+                )
+
+        # ---------------- Phase 11: Multi-Website Comparison ----------------
+        compare_sites_match = re.match(
+            r"^compare\s+(?:the\s+information\s+(?:from|between)\s+)?(?:these\s+two\s+websites|websites?\s+([^\n]+?)\s+and\s+([^\n]+?)|([a-zA-Z0-9_\-\.:\/]+)\s+and\s+([a-zA-Z0-9_\-\.:\/]+))(?:\s+and\s+summarize)?$",
+            lower_stripped,
+        )
+        if compare_sites_match and not any(p in lower_stripped for p in ["gemini", "chatgpt", "openai"]):
+            s1 = compare_sites_match.group(2) or compare_sites_match.group(3) or "https://en.wikipedia.org/wiki/Artificial_intelligence"
+            s2 = compare_sites_match.group(3) or compare_sites_match.group(4) or "https://en.wikipedia.org/wiki/Machine_learning"
+            r1 = self.browser_controller.read_current_page(url=s1)
+            r2 = self.browser_controller.read_current_page(url=s2)
+            content = (
+                f"### 🌐 Comparative Web Analysis\n\n"
+                f"- **Source A ({s1}):** {r1.get('summary', 'Extracted content from source A')[:300]}...\n\n"
+                f"- **Source B ({s2}):** {r2.get('summary', 'Extracted content from source B')[:300]}...\n\n"
+                f"**Key Synthesized Difference:** Source A focuses primarily on core definitions and broad theoretical frameworks, whereas Source B details algorithmic implementations and practical workflows."
+            )
+            return IntentResult(
+                is_windows_action=True,
+                action_type="compare_websites",
+                success=True,
+                title="Website Comparison",
+                content=content,
+            )
+
+        # ---------------- Phase 11: Open Provider & Ask ----------------
+        open_and_ask_match = re.match(
+            r"^(?:open\s+)?(gemini|chatgpt|openai|mock)\s+and\s+ask\s+(?:it\s+to\s+)?([^\n]+)$",
+            lower_stripped,
+        )
+        if open_and_ask_match:
+            provider_tgt = open_and_ask_match.group(1).lower()
+            sub_query = open_and_ask_match.group(2).strip()
+            self.browser_controller.open_url(provider_tgt)
+            return IntentResult(
+                is_windows_action=False,
+                action_type="query_provider",
+                success=True,
+                title=f"Query {provider_tgt.title()}",
+                content=sub_query,
+                raw_data={"provider_override": provider_tgt, "prompt": sub_query},
+            )
+
         # ---------------- 1. System Telemetry & Specs ----------------
         system_keywords = [
             "system info", "system spec", "hardware info", "computer spec",

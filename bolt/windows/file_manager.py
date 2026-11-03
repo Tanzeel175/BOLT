@@ -23,6 +23,7 @@ COMMON_WINDOWS_FOLDERS = {
     "temp": lambda: pathlib.Path(os.environ.get("TEMP", r"C:\Windows\Temp")),
     "program files": lambda: pathlib.Path(os.environ.get("ProgramFiles", r"C:\Program Files")),
     "windows": lambda: pathlib.Path(os.environ.get("SystemRoot", r"C:\Windows")),
+    "workspace": lambda: FileManager.get_workspace_path(),
 }
 
 
@@ -84,6 +85,65 @@ class FileManager:
                 "error": f"Failed to open '{path_str}': {e}",
                 "path": str(target_path),
             }
+
+    @staticmethod
+    def get_workspace_path() -> pathlib.Path:
+        """Resolve workspace directory from memory preferences or constants."""
+        try:
+            from bolt.memory.manager import get_memory_manager
+            mem = get_memory_manager()
+            saved_ws = mem.get_user_preference("workspace_location") or mem.get_user_preference("workspace_folder")
+            if saved_ws and pathlib.Path(saved_ws).exists():
+                return pathlib.Path(saved_ws)
+        except Exception:
+            pass
+        from bolt.config.constants import WORKSPACE_DIR
+        return WORKSPACE_DIR
+
+    @staticmethod
+    def get_recent_files(
+        folder_alias: str = "downloads",
+        extension: Optional[str] = None,
+        limit: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """
+        Locate the most recently created or modified files in a target directory.
+        Allows instructions like: 'Open my downloads folder and find the most recent PDF'.
+        """
+        folder_path = FileManager.resolve_folder_alias(folder_alias)
+        if not folder_path or not folder_path.exists():
+            folder_path = pathlib.Path.home() / "Downloads"
+
+        if not folder_path.exists():
+            return []
+
+        matched = []
+        ext_clean = extension.lower().strip() if extension else ""
+        if ext_clean and not ext_clean.startswith("."):
+            ext_clean = f".{ext_clean}"
+
+        try:
+            for item in folder_path.iterdir():
+                try:
+                    if item.is_file():
+                        if ext_clean and item.suffix.lower() != ext_clean:
+                            continue
+                        stat = item.stat()
+                        matched.append({
+                            "name": item.name,
+                            "path": str(item.resolve()),
+                            "size_kb": round(stat.st_size / 1024, 1),
+                            "modified_at": stat.st_mtime,
+                            "extension": item.suffix.lower(),
+                        })
+                except (PermissionError, OSError):
+                    continue
+        except Exception as e:
+            logger.warning(f"Error enumerating recent files in '{folder_path}': {e}")
+            return []
+
+        matched.sort(key=lambda x: x["modified_at"], reverse=True)
+        return matched[:limit]
 
     @staticmethod
     def search_files(
@@ -206,18 +266,25 @@ class FileManager:
             return {"success": False, "error": f"Failed reading file: {e}"}
 
     @staticmethod
-    def write_text_file(file_path: str, content: str, allow_overwrite: bool = True) -> Dict[str, Any]:
-        """Write content to text file, with optional overwrite protection."""
+    def write_text_file(
+        file_path: str,
+        content: str,
+        allow_overwrite: bool = True,
+        folder_alias: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Write content to text file, with optional overwrite protection and destination folder alias."""
         clean_path = file_path.strip().strip("'\"")
         p = pathlib.Path(clean_path)
         if not p.is_absolute() and len(p.parts) == 1:
-            desktop = FileManager.resolve_folder_alias("desktop")
-            if desktop:
-                p = desktop / clean_path
+            target_folder = FileManager.resolve_folder_alias(folder_alias or "desktop")
+            if target_folder:
+                target_folder.mkdir(parents=True, exist_ok=True)
+                p = target_folder / clean_path
             else:
                 p = p.expanduser().resolve()
         else:
             p = p.expanduser().resolve()
+            p.parent.mkdir(parents=True, exist_ok=True)
 
         if p.exists() and not allow_overwrite:
             stem = p.stem

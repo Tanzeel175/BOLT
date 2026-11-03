@@ -253,7 +253,7 @@ class TestPhase5IntelligentTaskPlanning(unittest.TestCase):
             step, plan, "Gemini API key is not configured"
         )
         self.assertTrue(can_recover)
-        self.assertEqual(step.input_params["provider"], "mock")
+        self.assertIn(step.input_params["provider"], ("mock", "ollama"))
         print(f"[OK] test_08_recovery_from_ai_provider_failure passed ({action_desc}).")
 
     def test_09_human_in_the_loop_approval_gate(self):

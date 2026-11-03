@@ -30,20 +30,19 @@ class TaskPlanner:
                     logger.info(f"Instantiated plan from remembered workflow '{remembered.get('name')}'")
                     return plan
 
-        # 1. Specialized Workflow A: AI Research & Summarization
+        # 1. Specialized Workflow A: AI Research & Summarization / Reporting
         if (
-            ("research" in lower or "find information" in lower or "latest" in lower)
-            and ("summarize" in lower or "findings" in lower or "developments" in lower)
-            and ("ai" in lower or "artificial intelligence" in lower or "machine learning" in lower or "news" in lower)
+            ("research" in lower or "find information" in lower or "investigate" in lower or "search for" in lower)
+            and ("summarize" in lower or "findings" in lower or "developments" in lower or "analyze" in lower or "report" in lower)
         ):
             return self._build_workflow_a_research(clean)
 
         # 2. Specialized Workflow B: Email Preparation with Approval Gate
-        if "email" in lower and any(v in lower for v in ["write", "draft", "prepare", "ask gemini", "ask chatgpt"]):
+        if "email" in lower and any(v in lower for v in ["write", "draft", "prepare", "compose", "ask gemini", "ask chatgpt"]):
             return self._build_workflow_b_email(clean)
 
         # 3. Specialized Workflow C: Programming Assistance (Run, Diagnose, Fix)
-        if any(term in lower for term in ["python project", "run it", "identify errors", "fix errors", "python error"]):
+        if any(term in lower for term in ["python project", "python file", "run the python", "run it", "identify the error", "identify errors", "fix errors", "fix it", "help me fix", "debug", "diagnose"]) and any(p in lower for p in ["python", "script", "code", "project"]):
             return self._build_workflow_c_programming(clean)
 
         # 4. Specialized Workflow D: Document Processing (Search, Read, Summarize, Save)
@@ -346,12 +345,12 @@ class TaskPlanner:
                         active_application="Browser Search",
                     ))
 
-            # 2. Summarize / Explain action
-            elif "summarize" in clause or "explain" in clause:
+            # 2. Summarize / Explain / Compare / Analyze action
+            elif any(w in clause for w in ["summarize", "explain", "compare", "analyze"]):
                 deps = [prev_step_id] if prev_step_id else []
                 prompt = f"Please explain or summarize according to instruction: {clause}"
                 if prev_step_id:
-                    prompt = f"Summarize or explain the results from previous step: ${{{prev_step_id}.result}}"
+                    prompt = f"Analyze or compare the results from the previous step according to instruction '{clause}':\n\n${{{prev_step_id}.result}}"
                 steps.append(TaskStep(
                     step_id=step_id,
                     description=f"AI synthesis: {clause}",
@@ -386,19 +385,34 @@ class TaskPlanner:
 
             # 4. Write / Type action (Typing into open app vs saving to file)
             elif "write" in clause or "type" in clause or "save" in clause:
-                is_file_save = any(w in clause for w in [".txt", "to file", "in a file", "in file", "to disk"])
+                is_file_save = any(
+                    w in clause for w in [
+                        ".txt", ".pdf", ".py", ".md", ".doc", "to file", "in a file",
+                        "in file", "to disk", "workspace", "folder", "document",
+                        "save it", "save to", "save in", "summary document",
+                    ]
+                )
                 if is_file_save:
-                    target_file = "bolt_output.txt"
-                    file_match = re.search(r"(?:in|to)\s+(?:a\s+)?([a-zA-Z0-9_\-\.]+\.txt)", clause)
+                    target_file = "summary_document.txt"
+                    file_match = re.search(r"(?:in|to)\s+(?:a\s+)?([a-zA-Z0-9_\-\.]+\.[a-zA-Z0-9]+)", clause)
                     if file_match:
                         target_file = file_match.group(1)
-                    content_ref = f"${{{prev_step_id}.content}}" if prev_step_id else "BOLT Task Output"
+                    elif "workspace" in clause:
+                        target_file = "summary_document.txt"
+
+                    folder_alias = "workspace" if "workspace" in clause else ""
+                    content_ref = f"${{{prev_step_id}.result}}" if prev_step_id else "BOLT Task Output"
                     deps = [prev_step_id] if prev_step_id else []
                     steps.append(TaskStep(
                         step_id=step_id,
-                        description=f"Save result to {target_file}",
+                        description=f"Save result to {target_file}" + (f" in {folder_alias}" if folder_alias else ""),
                         tool_name="write_text_file",
-                        input_params={"file_path": target_file, "content": content_ref, "allow_overwrite": False},
+                        input_params={
+                            "file_path": target_file,
+                            "content": content_ref,
+                            "allow_overwrite": False,
+                            "folder_alias": folder_alias,
+                        },
                         expected_output=f"File saved to {target_file}",
                         dependencies=deps,
                         active_application="File Manager",
@@ -423,6 +437,15 @@ class TaskPlanner:
             elif "open" in clause or "launch" in clause:
                 target = re.sub(r"^(?:open|launch|start|run)\s+", "", clause).strip()
                 if any(b in target for b in ["chrome", "edge", "firefox", "browser", "chatgpt", "gemini", "google", "gmail", "youtube"]) or target.startswith("http"):
+                    steps.append(TaskStep(
+                        step_id=step_id,
+                        description=f"Open web target: {target}",
+                        tool_name="open_website",
+                        input_params={"website_name_or_url": target},
+                        expected_output="Web page opened",
+                        dependencies=deps,
+                        active_application="Browser",
+                    ))
                     steps.append(TaskStep(
                         step_id=step_id,
                         description=f"Open web target: {target}",
