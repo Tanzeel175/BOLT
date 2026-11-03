@@ -357,24 +357,122 @@ class WindowsIntentDispatcher:
                 content=content,
             )
 
-        # ---------------- Phase 5: Human-in-the-Loop Decision Delivery ----------------
-        if lower_stripped in ["yes", "approve", "approved", "proceed", "sure", "ok", "i approve", "no", "reject", "cancel"]:
+        # ---------------- Phase 9: Security Decision & Approval Delivery ----------------
+        is_approval = lower_stripped in ["yes", "approve", "approved", "proceed", "sure", "ok", "i approve", "allow session", "allow for session", "trust session", "confirm"] or clean.strip().upper() == "CONFIRM"
+        is_rejection = lower_stripped in ["no", "reject", "cancel", "deny", "abort", "stop"]
+        is_session = lower_stripped in ["allow session", "allow for session", "trust session", "approve session"]
+
+        if is_approval or is_rejection:
             from bolt.tasks.multitasking_manager import get_multitasking_manager
             from bolt.tasks.models import TaskStatus
+            from bolt.security import get_permission_manager, ApprovalDecision
+            perm_mgr = get_permission_manager()
             mgr = get_multitasking_manager()
+
+            # A. Check active multi-action plan waiting approval
             if mgr.last_active_plan and mgr.last_active_plan.status == TaskStatus.WAITING_APPROVAL:
-                approved = lower_stripped in ["yes", "approve", "approved", "proceed", "sure", "ok", "i approve"]
-                res_plan = mgr.provide_user_decision(approved=approved)
+                res_plan = mgr.provide_user_decision(
+                    approved=is_approval,
+                    session_grant=is_session,
+                    typed_phrase=clean.strip(),
+                )
                 if res_plan:
                     summary_md = mgr.format_plan_summary_markdown(res_plan)
                     return IntentResult(
                         is_windows_action=True,
                         action_type="multi_action_task",
                         success=res_plan.is_completed() or res_plan.status == TaskStatus.WAITING_APPROVAL,
-                        title=f"{res_plan.title}: {'Approved' if approved else 'Rejected'}",
+                        title=f"{res_plan.title}: {'Approved' if is_approval else 'Rejected'}",
                         content=summary_md,
                         raw_data={"plan": res_plan.to_dict(), "plan_id": res_plan.plan_id},
                     )
+
+            # B. Check standalone pending approval requests in PermissionManager
+            pending_reqs = perm_mgr.get_pending_requests()
+            if pending_reqs:
+                target_req = pending_reqs[-1]
+                dec = ApprovalDecision.APPROVED_SESSION if is_session else (ApprovalDecision.APPROVED_ONCE if is_approval else ApprovalDecision.REJECTED)
+                ok, token_or_msg = perm_mgr.record_user_decision(
+                    target_req.request_id,
+                    decision=dec,
+                    typed_phrase=clean.strip(),
+                )
+                if ok and is_approval:
+                    from bolt.tasks.tool_registry import get_tool_registry
+                    tool_reg = get_tool_registry()
+                    exec_res = tool_reg.execute_tool(
+                        target_req.tool_name,
+                        approval_token=token_or_msg,
+                        **target_req.parameters,
+                    )
+                    return IntentResult(
+                        is_windows_action=True,
+                        action_type="security_approved_action",
+                        success=exec_res.get("success", True),
+                        title=f"Security Approved: {target_req.action_type}",
+                        content=f"✅ Approved and executed `{target_req.tool_name}`: {exec_res.get('message', 'Completed')}",
+                        raw_data=exec_res,
+                    )
+                else:
+                    return IntentResult(
+                        is_windows_action=True,
+                        action_type="security_decision",
+                        success=ok,
+                        title="Security Decision",
+                        content=f"Decision recorded: **{dec.value}** ({token_or_msg})." if ok else f"❌ {token_or_msg}",
+                    )
+
+        # ---------------- Phase 9: Security Policy & Audit Queries ----------------
+        if lower_stripped in ["show security policy", "security policy", "view security policy", "security status"]:
+            from bolt.security import get_permission_manager
+            pol = get_permission_manager().get_security_policy()
+            content = (
+                f"### 🛡️ BOLT Security Policy\n\n"
+                f"- **Security Mode:** `{pol.mode.upper()}`\n"
+                f"- **Trusted Directories ({len(pol.trusted_directories)}):** "
+                + (", ".join(f"`{d}`" for d in pol.trusted_directories) if pol.trusted_directories else "None (default)") + "\n"
+                f"- **Blocked Tools ({len(pol.blocked_tools)}):** "
+                + (", ".join(f"`{b}`" for b in pol.blocked_tools) if pol.blocked_tools else "None") + "\n"
+                f"- **Active Session Grants:** {len(pol.session_grants)}\n"
+                f"- **Typed Confirmation for Critical:** `Enabled`\n"
+            )
+            return IntentResult(
+                is_windows_action=True,
+                action_type="security_policy",
+                success=True,
+                title="Security Policy",
+                content=content,
+            )
+
+        if lower_stripped in ["show security log", "security log", "view security log", "security audit"]:
+            from bolt.security import get_permission_manager
+            events = get_permission_manager().audit_logger.get_recent_logs(limit=10)
+            if not events:
+                content = "No security events recorded yet."
+            else:
+                rows = [
+                    f"- `[{e.timestamp[11:19]}]` **{e.risk_level.label}** | `{e.decision.value.upper()}` — `{e.tool_name}` on `{e.target}`: *{e.reason}*"
+                    for e in events
+                ]
+                content = "### 📜 Recent Security Audit Events\n\n" + "\n".join(rows)
+            return IntentResult(
+                is_windows_action=True,
+                action_type="security_audit",
+                success=True,
+                title="Security Audit Log",
+                content=content,
+            )
+
+        if lower_stripped in ["revoke permissions", "revoke session permissions", "clear permissions"]:
+            from bolt.security import get_permission_manager
+            get_permission_manager().revoke_session_permissions()
+            return IntentResult(
+                is_windows_action=True,
+                action_type="revoke_permissions",
+                success=True,
+                title="Permissions Revoked",
+                content="🔒 All active session permissions and temporary security grants have been revoked.",
+            )
 
         # ---------------- Phase 5: Intelligent Task Planning & Multitasking ----------------
         if self._is_multi_action_instruction(lower_stripped):
@@ -586,6 +684,61 @@ class WindowsIntentDispatcher:
                 success=res.get("success", True),
                 title="Create File",
                 content=res.get("message", "File created."),
+                raw_data=res,
+            )
+
+        # ---------------- Phase 9: Delete File / Directory (Security Gated) ----------------
+        del_dir_match = re.match(
+            r"^(?:delete|remove|erase)\s+(?:the\s+)?(?:directory|folder)\s+([^\n]+)$",
+            lower_stripped,
+        )
+        if del_dir_match:
+            dir_target = del_dir_match.group(1).strip()
+            from bolt.tasks.tool_registry import get_tool_registry
+            tool_reg = get_tool_registry()
+            res = tool_reg.execute_tool("delete_directory", directory_path=dir_target)
+            if res.get("requires_approval"):
+                return IntentResult(
+                    is_windows_action=True,
+                    action_type="security_approval_required",
+                    success=True,
+                    title="Security Approval Required [CRITICAL]",
+                    content=res.get("details", res.get("error", "Approval required.")),
+                    raw_data=res,
+                )
+            return IntentResult(
+                is_windows_action=True,
+                action_type="delete_directory",
+                success=res.get("success", False),
+                title="Delete Directory",
+                content=res.get("message", res.get("error", "Failed to delete directory.")),
+                raw_data=res,
+            )
+
+        del_file_match = re.match(
+            r"^(?:delete|remove|erase)\s+(?:the\s+)?file\s+([^\n]+)$",
+            lower_stripped,
+        )
+        if del_file_match:
+            file_target = del_file_match.group(1).strip()
+            from bolt.tasks.tool_registry import get_tool_registry
+            tool_reg = get_tool_registry()
+            res = tool_reg.execute_tool("delete_file", file_path=file_target)
+            if res.get("requires_approval"):
+                return IntentResult(
+                    is_windows_action=True,
+                    action_type="security_approval_required",
+                    success=True,
+                    title="Security Approval Required [HIGH RISK]",
+                    content=res.get("details", res.get("error", "Approval required.")),
+                    raw_data=res,
+                )
+            return IntentResult(
+                is_windows_action=True,
+                action_type="delete_file",
+                success=res.get("success", False),
+                title="Delete File",
+                content=res.get("message", res.get("error", "Failed to delete file.")),
                 raw_data=res,
             )
 

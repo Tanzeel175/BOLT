@@ -24,10 +24,18 @@ class TaskStatus(str, Enum):
 
 
 class RiskLevel(str, Enum):
-    """Risk tier for tool executions governing approval gates."""
-    LOW = "low"                        # Automatic execution (opening apps/sites, searching, reading)
-    APPROVAL_REQUIRED = "approval"      # Important file mods, script runs, deletion
-    HIGH_RISK = "high_risk"            # Always require explicit confirmation (emails, purchases, forms)
+    """
+    Risk tier for tool executions governing approval gates (Phase 5 & Phase 9).
+    Level 1: LOW - Automatic execution (opening apps/sites, searching, reading).
+    Level 2: MODERATE / APPROVAL_REQUIRED - Contextual approval (file edits, project scripts, moving files).
+    Level 3: HIGH_RISK - Explicit approval required (emails, purchases, forms, deleting files).
+    Level 4: CRITICAL - Strong confirmation with typed confirmation phrase (mass delete, admin actions).
+    """
+    LOW = "low"                        # Level 1: Automatic execution
+    MODERATE = "moderate"              # Level 2: Contextual approval
+    APPROVAL_REQUIRED = "approval"      # Level 2 alias (backward compatibility)
+    HIGH_RISK = "high_risk"            # Level 3: Explicit approval required
+    CRITICAL = "critical"              # Level 4: Strong confirmation + typed phrase
 
 
 @dataclass
@@ -43,6 +51,8 @@ class TaskStep:
     risk_level: RiskLevel = RiskLevel.LOW
     requires_approval: bool = False
     approval_prompt: Optional[str] = None
+    requires_typed_confirmation: bool = False
+    confirmation_phrase: Optional[str] = None
     result: Any = None
     error: Optional[str] = None
     retry_count: int = 0
@@ -63,6 +73,8 @@ class TaskStep:
             "risk_level": self.risk_level.value if isinstance(self.risk_level, RiskLevel) else str(self.risk_level),
             "requires_approval": self.requires_approval,
             "approval_prompt": self.approval_prompt,
+            "requires_typed_confirmation": self.requires_typed_confirmation,
+            "confirmation_phrase": self.confirmation_phrase,
             "result": self.result,
             "error": self.error,
             "retry_count": self.retry_count,
@@ -90,6 +102,8 @@ class TaskStep:
             risk_level=risk,
             requires_approval=data.get("requires_approval", False),
             approval_prompt=data.get("approval_prompt"),
+            requires_typed_confirmation=data.get("requires_typed_confirmation", False),
+            confirmation_phrase=data.get("confirmation_phrase"),
             result=data.get("result"),
             error=data.get("error"),
             retry_count=data.get("retry_count", 0),

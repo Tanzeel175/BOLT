@@ -150,32 +150,71 @@ class ExecutionEngine:
         return plan
 
     def _execute_single_step(self, step: TaskStep, plan: ExecutionPlan) -> None:
-        """Execute a single step with approval checking, tool execution, and error recovery."""
-        # 1. Approval Gate Check
-        if step.requires_approval or step.risk_level in (RiskLevel.APPROVAL_REQUIRED, RiskLevel.HIGH_RISK):
+        """Execute a single step with security evaluation, approval checking, tool execution, and error recovery."""
+        from bolt.security import get_permission_manager, ApprovalDecision, SecurityRiskLevel
+        perm_mgr = get_permission_manager()
+
+        # 1. Resolve input placeholders from earlier steps to evaluate exact parameters
+        resolved_inputs = DependencyManager.resolve_step_inputs(step, plan)
+
+        # 2. Security & Risk Assessment (Phase 9)
+        req = perm_mgr.evaluate_action(step.tool_name, resolved_inputs)
+
+        # Map SecurityRiskLevel to TaskStep.risk_level
+        risk_map = {
+            SecurityRiskLevel.LOW: RiskLevel.LOW,
+            SecurityRiskLevel.MODERATE: RiskLevel.MODERATE,
+            SecurityRiskLevel.HIGH: RiskLevel.HIGH_RISK,
+            SecurityRiskLevel.CRITICAL: RiskLevel.CRITICAL,
+        }
+        step.risk_level = risk_map.get(req.risk_level, step.risk_level)
+        step.requires_typed_confirmation = req.requires_typed_confirmation
+        step.confirmation_phrase = req.confirmation_phrase
+
+        # Handle Policy Block
+        if req.status == ApprovalDecision.BLOCKED:
+            step.status = TaskStatus.FAILED
+            step.error = f"Security Policy Block: {req.reason}"
+            plan.status = TaskStatus.FAILED
+            logger.error(f"Step '{step.step_id}' blocked by security policy: {req.reason}")
+            return
+
+        # 3. Approval Gate Check
+        is_user_approved = getattr(step, "_approved_by_user", False)
+        needs_approval = (
+            not is_user_approved
+            and (
+                step.requires_approval
+                or step.risk_level in (RiskLevel.APPROVAL_REQUIRED, RiskLevel.MODERATE, RiskLevel.HIGH_RISK, RiskLevel.CRITICAL)
+            )
+            and not req.is_approved()
+        )
+
+        if needs_approval:
             step.status = TaskStatus.WAITING_APPROVAL
             plan.status = TaskStatus.WAITING_APPROVAL
             self._waiting_approval_step = step
-            prompt = step.approval_prompt or f"Action requires user approval: {step.description}"
+            prompt = req.format_display_markdown() if req else (step.approval_prompt or f"Action requires user approval: {step.description}")
+            step.approval_prompt = prompt
             logger.info(f"Step '{step.step_id}' is waiting for user approval: {prompt}")
+
+            # Register request under step_id for decision lookup
+            perm_mgr._pending_requests[step.step_id] = req
 
             if self.on_approval_needed:
                 self.on_approval_needed(plan.plan_id, step.step_id, step.description, prompt)
             return
 
-        # 2. Mark in progress
+        # 4. Mark in progress
         step.status = TaskStatus.IN_PROGRESS
         step.started_at = utc_now_iso()
         self._emit_progress(plan, current_step=step)
 
-        # 3. Resolve input placeholders from earlier steps
-        resolved_inputs = DependencyManager.resolve_step_inputs(step, plan)
-
-        # 4. Invoke tool handler
+        # 5. Invoke tool handler (bypassing redundant security prompt since step was already vetted)
         logger.info(f"Executing step '{step.step_id}' ({step.tool_name})...")
-        res = self.tool_registry.execute_tool(step.tool_name, **resolved_inputs)
+        res = self.tool_registry.execute_tool(step.tool_name, bypass_security_check=True, **resolved_inputs)
 
-        # 5. Handle Tool Result & Verification
+        # 6. Handle Tool Result & Verification
         if res.get("success", False):
             # Check if tool itself returned a human-in-the-loop requirement
             if res.get("requires_approval") or res.get("waiting_for_user"):
@@ -208,6 +247,8 @@ class ExecutionEngine:
         step_id: str,
         approved: bool,
         user_response: Optional[str] = None,
+        session_grant: bool = False,
+        typed_phrase: Optional[str] = None,
     ) -> ExecutionPlan:
         """Deliver user's approval or rejection response and resume plan execution."""
         step = plan.get_step(step_id)
@@ -215,8 +256,24 @@ class ExecutionEngine:
             logger.warning(f"No step waiting for approval matching step_id: {step_id}")
             return plan
 
+        from bolt.security import get_permission_manager, ApprovalDecision
+        perm_mgr = get_permission_manager()
+
         if approved:
-            logger.info(f"User APPROVED step '{step_id}'. Continuing execution.")
+            # Check typed confirmation phrase for Critical Risk
+            if step.requires_typed_confirmation:
+                expected = (step.confirmation_phrase or "CONFIRM").strip().upper()
+                actual = (typed_phrase or user_response or "").strip().upper()
+                if actual != expected:
+                    logger.warning(f"Confirmation phrase mismatch for step '{step_id}': expected '{expected}', got '{actual}'")
+                    step.error = f"Incorrect confirmation phrase. You must type '{expected}'."
+                    return plan
+
+            decision = ApprovalDecision.APPROVED_SESSION if session_grant else ApprovalDecision.APPROVED_ONCE
+            perm_mgr.record_user_decision(step_id, decision, typed_phrase=typed_phrase or user_response)
+
+            logger.info(f"User APPROVED step '{step_id}' ({decision.value}). Continuing execution.")
+            setattr(step, "_approved_by_user", True)
             step.requires_approval = False
             step.risk_level = RiskLevel.LOW
             if user_response:
@@ -233,6 +290,7 @@ class ExecutionEngine:
             self._waiting_approval_step = None
             return self.execute_plan(plan)
         else:
+            perm_mgr.record_user_decision(step_id, ApprovalDecision.REJECTED, user_note=user_response)
             logger.info(f"User REJECTED step '{step_id}'. Marking step skipped.")
             step.status = TaskStatus.SKIPPED
             step.error = "Action rejected by user."

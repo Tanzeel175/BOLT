@@ -6,9 +6,11 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -96,6 +98,7 @@ class TaskActivityPanel(QFrame):
     resume_requested = Signal()
     cancel_requested = Signal()
     approval_decided = Signal(str, bool)  # step_id, approved
+    security_approval_decided = Signal(str, bool, bool, str)  # step_id, approved, session_grant, typed_phrase
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -103,6 +106,8 @@ class TaskActivityPanel(QFrame):
         self.setFixedWidth(340)
         self.current_plan: Optional[ExecutionPlan] = None
         self.waiting_step_id: Optional[str] = None
+        self.is_critical: bool = False
+        self.confirmation_phrase: str = "CONFIRM"
         self._init_ui()
 
     def _init_ui(self):
@@ -184,11 +189,11 @@ class TaskActivityPanel(QFrame):
         self.scroll_area.setWidget(self.steps_container)
         layout.addWidget(self.scroll_area, 1)
 
-        # 4. Human-in-the-Loop Approval Card (hidden by default)
+        # 4. Human-in-the-Loop & Security Approval Card (hidden by default)
         self.approval_card = QFrame()
         self.approval_card.setStyleSheet("""
             QFrame {
-                background-color: #2d2200;
+                background-color: #1e1e0a;
                 border: 1px solid #d29922;
                 border-radius: 6px;
                 padding: 8px;
@@ -198,13 +203,62 @@ class TaskActivityPanel(QFrame):
         appr_layout.setContentsMargins(8, 8, 8, 8)
         appr_layout.setSpacing(6)
 
+        self.appr_badge_label = QLabel("🛡️ SECURITY APPROVAL REQUIRED")
+        self.appr_badge_label.setStyleSheet("color: #ffd60a; font-size: 11px; font-weight: 700;")
+        appr_layout.addWidget(self.appr_badge_label)
+
         self.appr_prompt_label = QLabel("Approval required to continue")
         self.appr_prompt_label.setWordWrap(True)
-        self.appr_prompt_label.setStyleSheet("color: #ffd60a; font-size: 11px; font-weight: 600;")
+        self.appr_prompt_label.setStyleSheet("color: #c9d1d9; font-size: 11px; font-weight: 500;")
         appr_layout.addWidget(self.appr_prompt_label)
 
+        # Proposed changes / diff preview
+        self.appr_preview_text = QTextEdit()
+        self.appr_preview_text.setReadOnly(True)
+        self.appr_preview_text.setMaximumHeight(85)
+        self.appr_preview_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #0d1117;
+                color: #58a6ff;
+                font-family: Consolas, 'Courier New', monospace;
+                font-size: 10px;
+                border: 1px solid #30363d;
+                border-radius: 4px;
+            }
+        """)
+        self.appr_preview_text.setVisible(False)
+        appr_layout.addWidget(self.appr_preview_text)
+
+        # Critical confirmation container
+        self.critical_container = QWidget()
+        crit_layout = QVBoxLayout(self.critical_container)
+        crit_layout.setContentsMargins(0, 2, 0, 2)
+        crit_layout.setSpacing(4)
+
+        self.critical_label = QLabel("⚠️ Critical Action: Type CONFIRM to enable:")
+        self.critical_label.setStyleSheet("color: #f85149; font-size: 10px; font-weight: 600;")
+        crit_layout.addWidget(self.critical_label)
+
+        self.input_confirmation = QLineEdit()
+        self.input_confirmation.setPlaceholderText("Type CONFIRM here...")
+        self.input_confirmation.setStyleSheet("""
+            QLineEdit {
+                background-color: #0d1117;
+                color: #f85149;
+                font-weight: 700;
+                border: 1px solid #da3633;
+                border-radius: 4px;
+                padding: 4px 6px;
+                font-size: 11px;
+            }
+        """)
+        self.input_confirmation.textChanged.connect(self._on_confirmation_text_changed)
+        crit_layout.addWidget(self.input_confirmation)
+        self.critical_container.setVisible(False)
+        appr_layout.addWidget(self.critical_container)
+
         btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(8)
+        btn_layout.setSpacing(6)
 
         self.btn_approve = QPushButton("✅ Approve")
         self.btn_approve.setStyleSheet("""
@@ -213,12 +267,30 @@ class TaskActivityPanel(QFrame):
                 color: #ffffff;
                 font-weight: 600;
                 border-radius: 4px;
-                padding: 5px 12px;
+                padding: 5px 8px;
+                font-size: 11px;
             }
             QPushButton:hover { background-color: #2ea043; }
+            QPushButton:disabled { background-color: #21262d; color: #484f58; }
         """)
         self.btn_approve.clicked.connect(self._on_approve_clicked)
         btn_layout.addWidget(self.btn_approve)
+
+        self.btn_session = QPushButton("🛡️ Session")
+        self.btn_session.setToolTip("Allow this action for the rest of this session")
+        self.btn_session.setStyleSheet("""
+            QPushButton {
+                background-color: #1f6feb;
+                color: #ffffff;
+                font-weight: 600;
+                border-radius: 4px;
+                padding: 5px 8px;
+                font-size: 11px;
+            }
+            QPushButton:hover { background-color: #388bfd; }
+        """)
+        self.btn_session.clicked.connect(self._on_session_clicked)
+        btn_layout.addWidget(self.btn_session)
 
         self.btn_reject = QPushButton("❌ Reject")
         self.btn_reject.setStyleSheet("""
@@ -227,7 +299,8 @@ class TaskActivityPanel(QFrame):
                 color: #ffffff;
                 font-weight: 600;
                 border-radius: 4px;
-                padding: 5px 12px;
+                padding: 5px 8px;
+                font-size: 11px;
             }
             QPushButton:hover { background-color: #f85149; }
         """)
@@ -326,28 +399,74 @@ class TaskActivityPanel(QFrame):
         if self.current_plan:
             self._render_steps(self.current_plan.steps)
 
-    def show_approval_prompt(self, step_id: str, prompt: str):
-        """Display the approval card for human confirmation."""
+    def show_approval_prompt(
+        self,
+        step_id: str,
+        prompt: str,
+        is_critical: bool = False,
+        confirmation_phrase: str = "CONFIRM",
+        preview_diff: Optional[str] = None,
+    ):
+        """Display the security approval card for human confirmation."""
         self.waiting_step_id = step_id
+        self.is_critical = is_critical
+        self.confirmation_phrase = confirmation_phrase
         self.appr_prompt_label.setText(prompt)
+
+        if is_critical:
+            self.appr_badge_label.setText("🔴 CRITICAL RISK ACTION REQUIRED")
+            self.appr_badge_label.setStyleSheet("color: #f85149; font-size: 11px; font-weight: 700;")
+            self.critical_container.setVisible(True)
+            self.input_confirmation.clear()
+            self.btn_approve.setEnabled(False)
+            self.btn_session.setVisible(False)
+        else:
+            self.appr_badge_label.setText("🛡️ SECURITY APPROVAL REQUIRED")
+            self.appr_badge_label.setStyleSheet("color: #ffd60a; font-size: 11px; font-weight: 700;")
+            self.critical_container.setVisible(False)
+            self.btn_approve.setEnabled(True)
+            self.btn_session.setVisible(True)
+
+        if preview_diff:
+            self.appr_preview_text.setPlainText(preview_diff)
+            self.appr_preview_text.setVisible(True)
+        else:
+            self.appr_preview_text.setVisible(False)
+
         self.approval_card.setVisible(True)
 
     def hide_approval_prompt(self):
         """Hide the approval card."""
         self.waiting_step_id = None
+        self.is_critical = False
         self.approval_card.setVisible(False)
+
+    def _on_confirmation_text_changed(self, text: str):
+        if self.is_critical:
+            matches = text.strip().upper() == (self.confirmation_phrase or "CONFIRM").upper()
+            self.btn_approve.setEnabled(matches)
 
     def _on_approve_clicked(self):
         if self.waiting_step_id:
             step_id = self.waiting_step_id
+            typed = self.input_confirmation.text().strip() if self.is_critical else ""
             self.hide_approval_prompt()
             self.approval_decided.emit(step_id, True)
+            self.security_approval_decided.emit(step_id, True, False, typed)
+
+    def _on_session_clicked(self):
+        if self.waiting_step_id:
+            step_id = self.waiting_step_id
+            self.hide_approval_prompt()
+            self.approval_decided.emit(step_id, True)
+            self.security_approval_decided.emit(step_id, True, True, "")
 
     def _on_reject_clicked(self):
         if self.waiting_step_id:
             step_id = self.waiting_step_id
             self.hide_approval_prompt()
             self.approval_decided.emit(step_id, False)
+            self.security_approval_decided.emit(step_id, False, False, "")
 
     def _render_steps(self, steps: List[TaskStep]):
         """Clear and redraw steps checklist."""

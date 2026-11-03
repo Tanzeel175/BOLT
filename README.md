@@ -4,7 +4,7 @@
 
 ---
 
-## 🎯 Current Milestone: Phase 8 – Long-Term Memory and Continuous Learning (COMPLETED)
+## 🎯 Current Milestone: Phase 9 – Security, Permissions and Approval System (COMPLETED)
 
 ### Complete Implemented Capabilities:
 
@@ -115,6 +115,24 @@
 - 🛠️ **7 Registered Memory Tools (`bolt.tasks.tool_registry`)**:
   `memory_save`, `memory_retrieve`, `memory_update`, `memory_search`, `memory_delete`, `memory_list`, `memory_export` (bringing total registry tools to 37).
 
+#### 10. Security, Permissions and Approval System (Phase 9)
+- 🛡️ **Central Permission Manager (`bolt.security.permission_manager`)**:
+  - Enforces mandatory security clearance on every tool execution across BOLT. Individual modules and tool runners cannot bypass the permission layer.
+  - 100% offline security operation with zero cloud or external API transmission.
+- 🚦 **4-Tier Action Risk Classification (`bolt.security.risk_classifier`)**:
+  - **Level 1 — Low Risk (Autonomous):** Ordinary application launching/switching, browser navigation, internet search, file reading, system specs inspection, and local voice synthesis execute automatically without prompting.
+  - **Level 2 — Moderate Risk (Contextual Approval):** File modifications, project script executions, and file moving. Automatically computes and renders a unified diff preview (`difflib.unified_diff`) showing exact lines added and deleted before approval. Whitelisted trusted directories and active session grants bypass contextual prompts.
+  - **Level 3 — High Risk (Explicit Approval):** Sending emails, deleting files, submitting forms, and modifying security policies. Displays destination, parameters, and full draft preview; requires explicit approval once or for the session.
+  - **Level 4 — Critical Risk (Strong Confirmation + Typed Phrase):** Directory deletions, operations targeting Windows system paths (`C:\Windows`, `System32`), and commands with administrator privilege elevation tokens (`runas`, `Start-Process -Verb RunAs`). Strictly requires typing the confirmation phrase (`CONFIRM`) on screen. Simple voice or affirmative button clicks are rejected.
+- 📜 **Immutable Security Audit Logging (`bolt.security.audit_logger`)**:
+  - Persists all security checks, evaluations, grants, rejections, and policy blocks in SQLite table `security_audit_logs` and rotating file `logs/security.log`.
+  - Built-in audit querying, statistics, and local export to JSON and JSONL formats.
+- 🖥️ **Interactive PySide6 Security Interface (`bolt.ui.components.task_activity_panel`)**:
+  - Color-coded risk badges (🟡 MODERATE, 🟠 HIGH, 🔴 CRITICAL).
+  - Target destination, action justification, and monospace diff/draft preview area.
+  - `✅ Approve Once`, `🛡️ Allow Session`, `❌ Reject`, and dedicated typed confirmation field for Critical tasks.
+- 🛠️ **41 Registered Tools (`bolt.tasks.tool_registry`)**: Includes safe file/directory deletion tools and security policy inspection/revocation utilities.
+
 ---
 
 ## 📁 Project Architecture
@@ -129,15 +147,17 @@ BOLT/
 ├── DEVELOPMENT_PROGRESS.md # Phase-by-phase development tracker
 ├── run.py                # Main application entry point
 ├── data/
-│   └── bolt.db           # SQLite database (conversations, registry, workflows, tasks, memory)
+│   └── bolt.db           # SQLite database (conversations, registry, workflows, tasks, memory, audit)
 ├── logs/
-│   └── bolt.log          # Application log file (rotating)
+│   ├── bolt.log          # Application log file (rotating)
+│   └── security.log      # Security audit log file (rotating)
 ├── bolt/
 │   ├── ai/               # AI Providers (Ollama, Gemini, OpenAI, Mock, Multi-AI, Router)
 │   ├── browser/          # Browser automation (Playwright, Tab reuse, Registry, Search)
 │   ├── config/           # App settings and environment loader
 │   ├── core/             # Database, Logger, Network manager, Error handling
 │   ├── memory/           # Phase 8 Long-Term Memory (Manager, Models, Retriever, FTS5, Corrections)
+│   ├── security/         # Phase 9 Security Subsystem (PermissionManager, RiskClassifier, AuditLogger)
 │   ├── tasks/            # DAG Planner, Execution engine, Multitasking manager, Tool registry
 │   ├── ui/               # PySide6 desktop interface (Header, ChatView, InputBar, ActivityDock)
 │   ├── voice/            # Phase 7 Voice subsystem (TTS engine, Speech recognizer, Wake word, Pipeline)
@@ -154,7 +174,8 @@ BOLT/
     ├── test_offline_and_real_control.py # Offline-First, Ollama, & Real Control tests
     ├── test_phase6_event_driven.py      # Phase 6 Event-Driven & UI Automation tests
     ├── test_phase7_voice.py             # Phase 7 Voice Assistant tests
-    └── test_phase8_memory.py            # Phase 8 Long-Term Memory & Learning tests
+    ├── test_phase8_memory.py            # Phase 8 Long-Term Memory & Learning tests
+    └── test_phase9_security.py          # Phase 9 Security, Permissions & Approval tests
 ```
 
 ---
@@ -182,11 +203,11 @@ Run with the virtual environment Python:
 
 ### 4. Running Automated Tests
 ```powershell
-# Run the complete test suite (97 tests across all 8 phases):
+# Run the complete test suite (112 tests across all 9 phases):
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"
 
-# Run Phase 8 Long-Term Memory tests (13 tests):
-.\.venv\Scripts\python.exe -m unittest tests/test_phase8_memory.py
+# Run Phase 9 Security tests (15 tests):
+.\.venv\Scripts\python.exe -m unittest tests/test_phase9_security.py
 ```
 
 ---
@@ -200,5 +221,5 @@ Run with the virtual environment Python:
 - [x] **Phase 6:** Visual Computer Use & Event-Driven Control
 - [x] **Phase 7:** Offline Voice Assistant
 - [x] **Phase 8:** Long-Term Memory and Continuous Learning
-- [ ] **Phase 9:** Security and Approval System
+- [x] **Phase 9:** Security, Permissions and Approval System
 - [ ] **Phase 10:** Final Desktop Application

@@ -240,6 +240,83 @@ class FileManager:
         except Exception as e:
             return {"success": False, "error": f"Failed writing file: {e}"}
 
+    @staticmethod
+    def delete_file(file_path: str) -> Dict[str, Any]:
+        """Safely delete a file with existence verification and protected path checks."""
+        clean_path = file_path.strip().strip("'\"")
+        p = pathlib.Path(clean_path)
+        if not p.is_absolute() and len(p.parts) == 1:
+            desktop = FileManager.resolve_folder_alias("desktop")
+            if desktop and (desktop / clean_path).exists():
+                p = desktop / clean_path
+            else:
+                p = p.expanduser().resolve()
+        else:
+            p = p.expanduser().resolve()
+
+        if not p.exists():
+            return {"success": False, "error": f"File does not exist: {p}"}
+        if p.is_dir():
+            return {"success": False, "error": f"Target path '{p}' is a directory, not a file. Use delete_directory."}
+
+        # Guard against system directories
+        sys_drive = os.environ.get("SystemDrive", "C:").lower()
+        p_str = str(p).lower()
+        if p_str in (f"{sys_drive}\\", f"{sys_drive}/", f"{sys_drive}") or "windows" in p_str.split(os.sep):
+            return {"success": False, "error": f"Cannot delete protected system file: {p}"}
+
+        try:
+            file_name = p.name
+            size_bytes = p.stat().st_size
+            p.unlink()
+            logger.info(f"Deleted file: {p}")
+            return {
+                "success": True,
+                "file_path": str(p),
+                "file_name": file_name,
+                "bytes_freed": size_bytes,
+                "message": f"Successfully deleted file `{file_name}` ({size_bytes} bytes).",
+            }
+        except Exception as e:
+            logger.error(f"Failed deleting file '{file_path}': {e}")
+            return {"success": False, "error": f"Failed deleting file: {e}"}
+
+    @staticmethod
+    def delete_directory(dir_path: str) -> Dict[str, Any]:
+        """Safely delete a directory and its contents with critical guardrails."""
+        import shutil
+        clean_path = dir_path.strip().strip("'\"")
+        resolved = FileManager.resolve_folder_alias(clean_path)
+        p = (resolved or pathlib.Path(clean_path)).expanduser().resolve()
+
+        if not p.exists():
+            return {"success": False, "error": f"Directory does not exist: {p}"}
+        if not p.is_dir():
+            return {"success": False, "error": f"Target path '{p}' is not a directory."}
+
+        # Guard against root/userprofile/windows directories
+        sys_drive = os.environ.get("SystemDrive", "C:").lower()
+        user_prof = os.environ.get("USERPROFILE", "").lower()
+        p_str = str(p).lower()
+
+        if p_str in (f"{sys_drive}\\", f"{sys_drive}/", f"{sys_drive}", user_prof):
+            return {"success": False, "error": f"Refusing to delete critical root/user home directory: {p}"}
+        if "windows" in p_str.split(os.sep) or "program files" in p_str.split(os.sep):
+            return {"success": False, "error": f"Refusing to delete Windows system directory: {p}"}
+
+        try:
+            shutil.rmtree(p)
+            logger.info(f"Deleted directory: {p}")
+            return {
+                "success": True,
+                "directory_path": str(p),
+                "directory_name": p.name,
+                "message": f"Successfully deleted directory `{p.name}` and all contents.",
+            }
+        except Exception as e:
+            logger.error(f"Failed deleting directory '{dir_path}': {e}")
+            return {"success": False, "error": f"Failed deleting directory: {e}"}
+
 
 _FILE_MGR_INSTANCE: Optional[FileManager] = None
 

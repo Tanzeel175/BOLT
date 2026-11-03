@@ -65,18 +65,20 @@ class ConversationSession:
         self.current_context["last_response"] = spoken_response
         logger.info(f"Execution complete. Awaiting follow-up commands ({self.follow_up_timeout}s timeout).")
 
-    def enter_approval_state(self, prompt: str, task_id: Optional[str] = None) -> str:
+    def enter_approval_state(self, prompt: str, task_id: Optional[str] = None, is_critical: bool = False) -> str:
         """Encountered a sensitive action requiring explicit user approval."""
         self.state = ConversationState.WAITING_APPROVAL
         self.pending_approval_task_id = task_id
         self.last_active_time = time.time()
-        logger.info(f"Voice approval state entered for task: {task_id}")
+        logger.info(f"Voice approval state entered for task: {task_id} (critical={is_critical})")
+        if is_critical:
+            return f"Critical action detected: {prompt}. For security, this cannot be authorized by voice. Please type CONFIRM on the screen."
         return f"This action requires your approval: {prompt}. Do you approve?"
 
     def handle_approval_response(self, user_text: str) -> Optional[bool]:
         """Evaluate if user text represents approval or rejection."""
         lower = user_text.strip().lower()
-        if lower in ["yes", "approve", "approved", "proceed", "sure", "ok", "i approve", "go ahead"]:
+        if lower in ["yes", "approve", "approved", "proceed", "sure", "ok", "i approve", "go ahead", "allow session", "approve session"]:
             self.state = ConversationState.EXECUTING
             self.last_active_time = time.time()
             return True

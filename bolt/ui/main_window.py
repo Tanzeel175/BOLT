@@ -188,11 +188,11 @@ class MainWindow(QMainWindow):
         self.input_bar.message_submitted.connect(self._handle_user_message)
         self.input_bar.voice_requested.connect(self._on_voice_requested)
 
-        # Task Activity Panel controls (Phase 5)
+        # Task Activity Panel controls (Phase 5 & Phase 9)
         self.task_panel.pause_requested.connect(self._on_task_pause_requested)
         self.task_panel.resume_requested.connect(self._on_task_resume_requested)
         self.task_panel.cancel_requested.connect(self._on_task_cancel_requested)
-        self.task_panel.approval_decided.connect(self._on_task_approval_decided)
+        self.task_panel.security_approval_decided.connect(self._on_task_security_approval_decided)
 
     def _load_conversations_and_initial_chat(self):
         """Load conversation list from SQLite and open the latest or create a new one."""
@@ -309,9 +309,12 @@ class MainWindow(QMainWindow):
                     if plan_obj.status == TaskStatus.WAITING_APPROVAL:
                         waiting_steps = [s for s in plan_obj.steps if s.status == TaskStatus.WAITING_APPROVAL]
                         if waiting_steps:
+                            w = waiting_steps[0]
                             self.task_panel.show_approval_prompt(
-                                waiting_steps[0].step_id,
-                                waiting_steps[0].approval_prompt or "Approval required to proceed.",
+                                w.step_id,
+                                w.approval_prompt or "Approval required to proceed.",
+                                is_critical=w.risk_level.value in ("critical", "4") or getattr(w, "requires_typed_confirmation", False),
+                                confirmation_phrase=getattr(w, "confirmation_phrase", "CONFIRM") or "CONFIRM",
                             )
             elif intent.action_type == "compare_ai":
                 model_used = "BOLT Multi-AI Engine"
@@ -472,11 +475,21 @@ class MainWindow(QMainWindow):
             mgr._active_workers[mgr.last_active_plan.plan_id].cancel_task()
         self.status_bar.set_ready("Task cancelled")
 
-    def _on_task_approval_decided(self, step_id: str, approved: bool):
+    def _on_task_security_approval_decided(
+        self,
+        step_id: str,
+        approved: bool,
+        session_grant: bool = False,
+        typed_phrase: Optional[str] = None,
+    ):
         from bolt.tasks.multitasking_manager import get_multitasking_manager
         from bolt.tasks.models import TaskStatus
         mgr = get_multitasking_manager()
-        res_plan = mgr.provide_user_decision(approved=approved)
+        res_plan = mgr.provide_user_decision(
+            approved=approved,
+            session_grant=session_grant,
+            typed_phrase=typed_phrase,
+        )
         if res_plan:
             self.task_panel.set_plan(res_plan)
             summary_md = mgr.format_plan_summary_markdown(res_plan)

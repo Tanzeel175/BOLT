@@ -43,7 +43,13 @@ class MultitaskingManager:
         self.last_active_plan = executed_plan
         return executed_plan
 
-    def provide_user_decision(self, approved: bool, user_response: Optional[str] = None) -> Optional[ExecutionPlan]:
+    def provide_user_decision(
+        self,
+        approved: bool,
+        user_response: Optional[str] = None,
+        session_grant: bool = False,
+        typed_phrase: Optional[str] = None,
+    ) -> Optional[ExecutionPlan]:
         """Deliver user's approval or rejection response to the currently waiting plan."""
         if not self.last_active_plan or self.last_active_plan.status != TaskStatus.WAITING_APPROVAL:
             return None
@@ -55,7 +61,14 @@ class MultitaskingManager:
 
         step = waiting_steps[0]
         engine = ExecutionEngine(workflow_memory=self.workflow_mem)
-        executed_plan = engine.provide_approval(self.last_active_plan, step.step_id, approved, user_response)
+        executed_plan = engine.provide_approval(
+            self.last_active_plan,
+            step.step_id,
+            approved=approved,
+            user_response=user_response,
+            session_grant=session_grant,
+            typed_phrase=typed_phrase,
+        )
         self.last_active_plan = executed_plan
         return executed_plan
 

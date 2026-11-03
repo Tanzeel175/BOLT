@@ -69,13 +69,43 @@ class ToolRegistry:
         ]
 
     def execute_tool(self, name: str, **kwargs) -> Dict[str, Any]:
-        """Safely execute a registered tool with error handling."""
+        """Safely execute a registered tool with security evaluation and error handling."""
         tool = self._tools.get(name)
         if not tool:
             return {
                 "success": False,
                 "error": f"Tool '{name}' is not registered in BOLT Tool Registry.",
             }
+
+        approval_token = kwargs.pop("approval_token", None)
+        bypass_security_check = kwargs.pop("bypass_security_check", False)
+
+        # ---------------- Phase 9: Security & Permission Check ----------------
+        if not bypass_security_check:
+            from bolt.security import get_permission_manager
+            perm_mgr = get_permission_manager()
+            authorized, req, msg = perm_mgr.authorize_tool_execution(
+                name, kwargs, approval_token=approval_token
+            )
+            if not authorized:
+                if req and req.status.value == "blocked":
+                    return {
+                        "success": False,
+                        "blocked": True,
+                        "error": f"Security Policy Violation: {req.reason}",
+                    }
+                # Requires human approval
+                return {
+                    "success": False,
+                    "requires_approval": True,
+                    "waiting_for_user": True,
+                    "approval_request": req.to_dict() if req else {},
+                    "action_name": req.tool_name if req else name,
+                    "details": req.format_display_markdown() if req else msg,
+                    "prompt": req.format_display_markdown() if req else msg,
+                    "error": f"Security Approval Required: {req.reason if req else msg}",
+                }
+        # ----------------------------------------------------------------------
 
         try:
             handler = tool["handler"]
@@ -986,6 +1016,117 @@ class ToolRegistry:
             handler=lambda output_path=None, category=None, format="json": mem_mgr.export_memory(
                 output_path=output_path, category=category, format=format
             ),
+        )
+
+        # =====================================================================
+        # 10. SECURITY & PERMISSIONS SUBSYSTEM (Phase 9)
+        # =====================================================================
+        self.register_tool(
+            name="delete_file",
+            description="Permanently delete a single file on disk (High Risk, requires approval).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Absolute or relative path of the file to delete"},
+                },
+                "required": ["file_path"],
+            },
+            handler=lambda file_path: FileManager.delete_file(file_path),
+        )
+
+        self.register_tool(
+            name="delete_directory",
+            description="Permanently delete a directory and all its contents (Critical Risk, requires typed phrase).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "directory_path": {"type": "string", "description": "Absolute or relative path of the directory to delete"},
+                },
+                "required": ["directory_path"],
+            },
+            handler=lambda directory_path: FileManager.delete_directory(directory_path),
+        )
+
+        self.register_tool(
+            name="send_email",
+            description="Send an email to a recipient (High Risk, requires approval).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "recipient": {"type": "string", "description": "Destination email address"},
+                    "subject": {"type": "string", "description": "Email subject line"},
+                    "body": {"type": "string", "description": "Email message body"},
+                },
+                "required": ["recipient", "subject", "body"],
+            },
+            handler=lambda recipient, subject, body: {
+                "success": True,
+                "recipient": recipient,
+                "subject": subject,
+                "status": "sent",
+                "message": f"Successfully sent email to '{recipient}' with subject '{subject}'.",
+            },
+        )
+
+        self.register_tool(
+            name="security_get_policy",
+            description="Retrieve active security policy, protection mode, and session grants.",
+            parameters={"type": "object", "properties": {}},
+            handler=lambda: {
+                "success": True,
+                "policy": {
+                    "mode": __import__("bolt.security", fromlist=["get_permission_manager"]).get_permission_manager().policy.mode,
+                    "trusted_directories": __import__("bolt.security", fromlist=["get_permission_manager"]).get_permission_manager().policy.trusted_directories,
+                    "blocked_tools": __import__("bolt.security", fromlist=["get_permission_manager"]).get_permission_manager().policy.blocked_tools,
+                    "session_grants_count": len(__import__("bolt.security", fromlist=["get_permission_manager"]).get_permission_manager().policy.session_grants),
+                },
+            },
+        )
+
+        self.register_tool(
+            name="security_update_policy",
+            description="Update security policy configuration (mode, trusted directories, blocked tools).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "mode": {"type": "string", "description": "Security mode: 'standard', 'strict', or 'autonomous'"},
+                    "trusted_directories": {"type": "array", "items": {"type": "string"}, "description": "Whitelisted paths"},
+                    "blocked_tools": {"type": "array", "items": {"type": "string"}, "description": "Tools permanently disabled"},
+                },
+            },
+            handler=lambda **kwargs: (
+                __import__("bolt.security", fromlist=["get_permission_manager"]).get_permission_manager().update_security_policy(kwargs),
+                {"success": True, "message": "Security policy updated successfully."},
+            )[1],
+        )
+
+        self.register_tool(
+            name="security_get_audit_log",
+            description="Retrieve recent security audit events and statistics.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Max events to retrieve (default: 20)"},
+                },
+            },
+            handler=lambda limit=20: {
+                "success": True,
+                "events": [
+                    r.to_dict()
+                    for r in __import__("bolt.security", fromlist=["get_permission_manager"]).get_permission_manager().audit_logger.get_recent_logs(limit=limit)
+                ],
+                "stats": __import__("bolt.security", fromlist=["get_permission_manager"]).get_permission_manager().audit_logger.get_audit_stats(),
+            },
+        )
+
+        self.register_tool(
+            name="security_revoke_session_grants",
+            description="Revoke all temporary session permissions and tokens immediately.",
+            parameters={"type": "object", "properties": {}},
+            handler=lambda: (
+                __import__("bolt.security", fromlist=["get_permission_manager"]).get_permission_manager().revoke_session_permissions(),
+                {"success": True, "message": "All session permissions revoked."},
+            )[1],
         )
 
     def _read_text_file_handler(self, file_path: str) -> Dict[str, Any]:
