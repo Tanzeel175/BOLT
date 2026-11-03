@@ -1,6 +1,6 @@
 """
 BOLT - Personal Autonomous AI Assistant for Windows
-Entry point to launch the Phase 1 Desktop Application.
+Entry point to launch the BOLT Desktop Application.
 """
 
 import os
@@ -11,6 +11,15 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
+
+# Windows taskbar grouping & modern AppUserModelID
+if sys.platform == "win32":
+    try:
+        import ctypes
+        from bolt.config.constants import APP_USER_MODEL_ID
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
+    except Exception:
+        pass
 
 # Register Windows DLL directories & plugin paths for PySide6 and shiboken6
 if sys.platform == "win32":
@@ -32,10 +41,18 @@ if sys.platform == "win32":
             pass
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
-from bolt.config.constants import APP_NAME, APP_ORGANIZATION, APP_VERSION
+from bolt.config.constants import (
+    APP_NAME,
+    APP_ORGANIZATION,
+    APP_VERSION,
+    APP_ICON_PNG,
+    APP_ICON_ICO,
+)
 from bolt.config.settings import get_settings
+from bolt.core.data_manager import get_data_manager
 from bolt.core.database import get_database
 from bolt.core.logger import setup_logger, get_logger
 from bolt.ui.main_window import MainWindow
@@ -47,13 +64,15 @@ def main():
     settings = get_settings()
     logger = setup_logger(log_level=settings.log_level)
     logger.info("=" * 60)
-    logger.info(f"Starting {APP_NAME} v{APP_VERSION} (Phase 1: Foundation & UI)")
+    logger.info(f"Starting {APP_NAME} v{APP_VERSION} (Phase 10: Desktop App & Deployment)")
     logger.info(f"Active Provider: {settings.provider} | Model: {settings.current_model}")
     logger.info("=" * 60)
 
-    # 2. Verify Database Initialized
+    # 2. Verify Persistent User Storage Isolation & SQLite Database Initialized
+    data_mgr = get_data_manager()
+    data_mgr.initialize_storage()
     db = get_database()
-    logger.info("SQLite Database initialized and ready.")
+    logger.info("Persistent storage verified and SQLite Database ready.")
 
     # 3. Configure Windows High-DPI Scaling & Modern Qt Environment
     if hasattr(Qt, "AA_EnableHighDpiScaling"):
@@ -65,6 +84,15 @@ def main():
     app.setApplicationName(APP_NAME)
     app.setOrganizationName(APP_ORGANIZATION)
     app.setApplicationVersion(APP_VERSION)
+
+    # Allow app to keep running in system tray when main window is closed/hidden
+    app.setQuitOnLastWindowClosed(False)
+
+    # Set Application Icon
+    if APP_ICON_PNG.exists():
+        app.setWindowIcon(QIcon(str(APP_ICON_PNG)))
+    elif APP_ICON_ICO.exists():
+        app.setWindowIcon(QIcon(str(APP_ICON_ICO)))
 
     # 4. Apply Dark Theme Stylesheet
     app.setStyleSheet(DARK_THEME_QSS)

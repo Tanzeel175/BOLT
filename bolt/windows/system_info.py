@@ -64,9 +64,11 @@ class SystemInfo:
             "hostname": hostname,
             "username": username,
             "cpu_model": cpu_model,
+            "processor": cpu_model,
             "cpu_cores": f"{cpu_cores} physical ({cpu_threads} logical)",
             "cpu_usage_pct": cpu_percent,
             "ram_total_gb": total_ram_gb,
+            "total_ram_gb": total_ram_gb,
             "ram_used_gb": used_ram_gb,
             "ram_available_gb": avail_ram_gb,
             "ram_usage_pct": ram_percent,
@@ -75,6 +77,9 @@ class SystemInfo:
             "disk_usage_pct": disk_percent,
             "battery": battery_info,
         }
+
+    # Backward compatibility alias
+    get_system_specs = get_system_summary
 
     @staticmethod
     def format_markdown_summary() -> str:

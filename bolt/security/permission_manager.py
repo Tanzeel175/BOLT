@@ -361,3 +361,4 @@ def get_permission_manager() -> PermissionManager:
     if _PERMISSION_MANAGER is None:
         _PERMISSION_MANAGER = PermissionManager()
     return _PERMISSION_MANAGER
+

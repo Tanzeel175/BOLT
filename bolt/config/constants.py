@@ -1,26 +1,78 @@
 """Application constants, file system paths, and defaults for BOLT."""
 
+import os
 from pathlib import Path
+import sys
 
-# Base Paths
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-BOLT_DIR = ROOT_DIR / "bolt"
-DATA_DIR = ROOT_DIR / "data"
-LOGS_DIR = ROOT_DIR / "logs"
-
-# Ensure runtime directories exist
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-LOGS_DIR.mkdir(parents=True, exist_ok=True)
-
-# Database and Log Paths
-DB_PATH = DATA_DIR / "bolt.db"
-LOG_FILE_PATH = LOGS_DIR / "bolt.log"
+from bolt.__version__ import (
+    __app_name__,
+    __author__,
+    __description__,
+    __organization__,
+    __subtitle__,
+    __version__,
+)
 
 # Application Identity
-APP_NAME = "BOLT"
-APP_SUBTITLE = "Autonomous Windows AI Assistant"
-APP_VERSION = "0.2.0"
-APP_ORGANIZATION = "BOLT Systems"
+APP_NAME = __app_name__
+APP_SUBTITLE = __subtitle__
+APP_VERSION = __version__
+APP_ORGANIZATION = __organization__
+APP_AUTHOR = __author__
+APP_DESCRIPTION = __description__
+APP_USER_MODEL_ID = "BOLTSystems.BOLT.Assistant.1.0"
+
+# Packaging / Frozen Detection
+IS_FROZEN = getattr(sys, "frozen", False)
+
+# Base Paths
+if IS_FROZEN:
+    # Running as a compiled PyInstaller executable
+    INSTALL_DIR = Path(sys.executable).resolve().parent
+    BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", str(INSTALL_DIR)))
+    ROOT_DIR = INSTALL_DIR
+else:
+    # Running from Python source repository
+    ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+    BUNDLE_DIR = ROOT_DIR
+    INSTALL_DIR = ROOT_DIR
+
+BOLT_DIR = ROOT_DIR / "bolt"
+ASSETS_DIR = ROOT_DIR / "assets"
+ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+
+# ---------------- Persistent Windows User Data Directories (Phase 10) ----------------
+# Ensures database, logs, workflows, and memory survive application updates and uninstalls.
+# SQLite databases must NEVER be written to the temporary _MEIPASS extraction folder.
+if IS_FROZEN or os.environ.get("BOLT_USE_APPDATA") == "1":
+    local_app_data = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+    USER_DATA_ROOT = Path(local_app_data) / "BOLT"
+else:
+    USER_DATA_ROOT = ROOT_DIR
+
+DATA_DIR = Path(os.environ.get("BOLT_DATA_DIR", str(USER_DATA_ROOT / "data")))
+LOGS_DIR = Path(os.environ.get("BOLT_LOGS_DIR", str(USER_DATA_ROOT / "logs")))
+BACKUPS_DIR = Path(os.environ.get("BOLT_BACKUPS_DIR", str(USER_DATA_ROOT / "backups")))
+WORKSPACE_DIR = Path(os.environ.get("BOLT_WORKSPACE_DIR", str(USER_DATA_ROOT / "workspace")))
+CONFIG_DIR = USER_DATA_ROOT / "config"
+
+# Aliases
+BACKUP_DIR = BACKUPS_DIR
+
+# Ensure all runtime and user data directories exist
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
+BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+# Database, Logs, and Icon Paths
+DB_PATH = DATA_DIR / "bolt.db"
+DATABASE_PATH = DB_PATH
+LOG_FILE_PATH = LOGS_DIR / "bolt.log"
+SECURITY_LOG_PATH = LOGS_DIR / "security.log"
+APP_ICON_ICO = ASSETS_DIR / "bolt_icon.ico"
+APP_ICON_PNG = ASSETS_DIR / "bolt_icon.png"
 
 # Window Default Dimensions
 DEFAULT_WINDOW_WIDTH = 1100

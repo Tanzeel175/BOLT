@@ -199,3 +199,4 @@ def get_security_audit_logger() -> SecurityAuditLogger:
     if _AUDIT_LOGGER is None:
         _AUDIT_LOGGER = SecurityAuditLogger()
     return _AUDIT_LOGGER
+

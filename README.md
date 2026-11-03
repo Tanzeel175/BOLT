@@ -4,9 +4,19 @@
 
 ---
 
-## 🎯 Current Milestone: Phase 9 – Security, Permissions and Approval System (COMPLETED)
+## 🎯 Current Milestone: Phase 10 – Final Desktop Application & Windows Deployment (COMPLETED — 100% Complete)
 
 ### Complete Implemented Capabilities:
+
+#### 10. Desktop Application & Windows Deployment (Phase 10)
+- 📦 **Standalone PyInstaller Packaging (`bolt.spec`)**: Configured for Windows 11 64-bit with onedir distribution, embedded PE version metadata, application icons, and automatic resource bundling.
+- 📂 **Persistent User Data Isolation (`%LOCALAPPDATA%\BOLT`)**: Separates application binaries from persistent user data (`bolt.db`, logs, backups, memory), ensuring zero data loss during application updates, reinstalls, or PyInstaller temp directory extraction.
+- 💾 **Live WAL SQLite Backups & Restorations**: Uses native SQLite online backup API (`conn.backup()`) to capture atomic point-in-time snapshots during active WAL mode without locking or concurrency errors.
+- 🔄 **Automated Pre-Migration Snapshots & Pruning**: Captures safety snapshots before schema migrations and provides automated backup rotation (`clean_old_backups`).
+- 🧙 **First-Run Guided Setup Wizard (`bolt/ui/setup_wizard.py`)**: Automatic first-run onboarding verifying Windows 11 compatibility, 16 GB RAM host, local Ollama runtime, `gemma4:e2b` model, microphone hardware, and optional cloud keys.
+- ⚙️ **Tabbed Settings & Configuration Dialog (`bolt/ui/settings_dialog.py`)**: Centralized management for AI Brain, Voice & Audio, Security Permissions, Default Browser, and Live Backups with safe defaults reset.
+- 🔔 **Windows System Tray & Background Operations (`bolt/ui/system_tray.py`)**: System tray icon with background minimize, context menu, and native desktop notifications for tasks and security events.
+- ⚡ **1-Click Launchers & Shortcuts**: `run.bat` batch launcher, `scripts/build_executable.py` automated build script, and `scripts/create_shortcut.ps1` PowerShell desktop shortcut installer.
 
 #### 1. Foundation & Desktop Interface (Phase 1)
 - 🖥️ **PySide6 Dark-Themed Desktop Interface** tailored for Windows 11.
@@ -196,18 +206,31 @@ ollama run gemma4:e2b
 ```
 
 ### 3. Launching BOLT
-Run with the virtual environment Python:
+You can launch BOLT instantly without opening an IDE:
 ```powershell
+# 1-Click Launch via batch file:
+.\run.bat
+
+# Or run via virtual environment Python:
 .\.venv\Scripts\python.exe run.py
 ```
 
-### 4. Running Automated Tests
+### 4. Standalone Windows Packaging (PyInstaller)
 ```powershell
-# Run the complete test suite (112 tests across all 9 phases):
+# Build standalone Windows 11 executable:
+.\.venv\Scripts\python.exe scripts/build_executable.py
+
+# Install Desktop and Start Menu shortcuts:
+powershell -ExecutionPolicy Bypass -File scripts/create_shortcut.ps1
+```
+
+### 5. Running Automated Tests
+```powershell
+# Run the complete test suite (124 tests across all 10 phases):
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"
 
-# Run Phase 9 Security tests (15 tests):
-.\.venv\Scripts\python.exe -m unittest tests/test_phase9_security.py
+# Run Phase 10 Deployment tests (12 tests):
+.\.venv\Scripts\python.exe -m unittest tests/test_phase10_deployment.py
 ```
 
 ---
@@ -222,4 +245,4 @@ Run with the virtual environment Python:
 - [x] **Phase 7:** Offline Voice Assistant
 - [x] **Phase 8:** Long-Term Memory and Continuous Learning
 - [x] **Phase 9:** Security, Permissions and Approval System
-- [ ] **Phase 10:** Final Desktop Application
+- [x] **Phase 10:** Final Desktop Application and Windows Deployment (100% COMPLETED)

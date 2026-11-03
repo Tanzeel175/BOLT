@@ -1025,9 +1025,11 @@ class Database:
 _DB_INSTANCE: Optional[Database] = None
 
 
-def get_database() -> Database:
+def get_database(db_path: Optional[Path] = None) -> Database:
     """Singleton getter for the SQLite database manager."""
     global _DB_INSTANCE
+    if db_path is not None:
+        return Database(db_path=Path(db_path))
     if _DB_INSTANCE is None:
         _DB_INSTANCE = Database()
     return _DB_INSTANCE

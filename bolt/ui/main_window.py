@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 from bolt.ai.base import ChatMessage, AIResponse
 from bolt.ai.router import AIRouter, get_ai_router
 from bolt.config.constants import (
+    APP_ICON_PNG,
     APP_NAME,
     APP_SUBTITLE,
     APP_VERSION,
@@ -30,7 +31,8 @@ from bolt.ui.components.chat_view import ChatView
 from bolt.ui.components.input_bar import InputBar
 from bolt.ui.components.task_status import TaskStatusBar
 from bolt.ui.components.task_activity_panel import TaskActivityPanel
-from bolt.ui.components.settings_dialog import SettingsDialog
+from bolt.ui.settings_dialog import SettingsDialog
+from bolt.ui.system_tray import BOLTSystemTray
 from bolt.windows.intent_dispatcher import WindowsIntentDispatcher, get_intent_dispatcher
 
 logger = get_logger("MainWindow")
@@ -103,12 +105,62 @@ class MainWindow(QMainWindow):
         self._init_window()
         self._init_layout()
         self._connect_signals()
+        self._init_system_tray()
         self._load_conversations_and_initial_chat()
 
     def _init_window(self):
-        self.setWindowTitle(f"{APP_NAME} – {APP_SUBTITLE} (v{APP_VERSION})")
+        from PySide6.QtGui import QIcon
+        self.setWindowTitle(f"{APP_NAME} — {APP_SUBTITLE} (v{APP_VERSION})")
         self.resize(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
         self.setMinimumSize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
+        if APP_ICON_PNG.exists():
+            self.setWindowIcon(QIcon(str(APP_ICON_PNG)))
+
+    def _init_system_tray(self):
+        """Initialize Windows system tray icon and background minimize behavior."""
+        self.tray = BOLTSystemTray(self)
+        self.tray.open_requested.connect(self._restore_from_tray)
+        self.tray.settings_requested.connect(self._open_settings)
+        self.tray.backup_requested.connect(self._on_tray_backup_requested)
+        self.tray.quit_requested.connect(self._on_tray_quit_requested)
+        self.tray.show()
+
+    def _restore_from_tray(self):
+        self.showNormal()
+        self.activateWindow()
+        self.raise_()
+
+    def _on_tray_backup_requested(self):
+        from bolt.core.data_manager import get_data_manager
+        bp = get_data_manager().create_backup(tag="tray_quick")
+        if self.tray:
+            self.tray.show_desktop_notification("Backup Complete", f"Snapshot saved:\n{bp.name}")
+
+    def _on_tray_quit_requested(self):
+        from PySide6.QtWidgets import QApplication
+        if hasattr(self, "tray") and self.tray:
+            self.tray.hide()
+        QApplication.quit()
+
+    def closeEvent(self, event):
+        """Minimize to system tray so BOLT continues running in background."""
+        if hasattr(self, "tray") and self.tray and self.tray.isVisible():
+            self.hide()
+            self.tray.show_desktop_notification("BOLT Running in Background", "Click tray icon to reopen.")
+            event.ignore()
+        else:
+            event.accept()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Check first-run onboarding wizard
+        try:
+            from bolt.ui.setup_wizard import is_first_run, SetupWizardDialog
+            if is_first_run():
+                wizard = SetupWizardDialog(self)
+                wizard.exec()
+        except Exception as e:
+            logger.debug(f"First-run check note: {e}")
 
     def _init_layout(self):
         central_widget = QWidget(self)

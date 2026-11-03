@@ -291,3 +291,4 @@ class SecurityPolicy:
             if clean.startswith(td_clean):
                 return True
         return False
+
