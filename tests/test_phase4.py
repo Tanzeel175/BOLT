@@ -196,6 +196,7 @@ class TestPhase4AIIntegration(unittest.TestCase):
         self.assertFalse(r5.is_windows_action)
         self.assertEqual(r5.action_type, "query_provider")
         self.assertEqual(r5.raw_data["provider_override"], "chatgpt")
+        dispatcher.dispatch("Switch default provider to Ollama")
         print("[OK] test_08_natural_language_ai_intents passed.")
 
     def test_09_browser_based_interaction_method_b(self):
