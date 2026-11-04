@@ -198,6 +198,108 @@ class RiskClassifier:
             req.reason = "Typing or key input into desktop application."
             return req
 
+        # ---------------- HCU Semantic Accessibility Tools ----------------
+        if clean_tool == "inspect_active_window_controls":
+            req.risk_level = SecurityRiskLevel.LOW
+            req.action_type = "Inspect Accessible Controls"
+            req.target = params.get("window_query") or "Active Window"
+            req.reason = "Read-only inspection of active application controls without side effects."
+            return req
+
+        if clean_tool == "click_control_by_id":
+            from bolt.windows.ui_automation import get_interactive_element_registry
+            reg = get_interactive_element_registry()
+            elem_id = params.get("element_id")
+            info = reg.get_element(elem_id)
+            win_title = (reg.window_title or "").lower()
+            elem_name = (info.name if info else "").lower()
+            ctrl_type = (info.control_type if info else "").lower()
+
+            target_desc = f"Control [{elem_id}] '{info.name if info else 'Unknown'}' in '{reg.window_title or 'Active Window'}'"
+            req.target = target_desc
+
+            # 1. Critical Risk Check: Administrative / Destruction tools
+            admin_apps = ("regedit", "registry editor", "command prompt", "powershell", "disk management", "device manager", "group policy")
+            if any(app in win_title for app in admin_apps) and any(w in elem_name for w in ("delete", "format", "clear", "remove", "disable", "elevation")):
+                req.risk_level = SecurityRiskLevel.CRITICAL
+                req.action_type = "Critical System Control Action"
+                req.reason = f"Executing administrative command in '{reg.window_title}' on critical control '{info.name if info else elem_id}'."
+                req.requires_typed_confirmation = True
+                req.confirmation_phrase = "CONFIRM"
+                return req
+
+            # 2. High Risk Check: Financial, Irreversible Deletion, Sending Comms, Web Submission
+            financial_terms = ("buy", "purchase", "checkout", "pay", "payment", "transfer funds", "order now", "complete payment")
+            if any(term in elem_name for term in financial_terms) or (
+                any(term in win_title for term in ("bank", "paypal", "checkout", "billing"))
+                and any(term in elem_name for term in ("pay", "buy", "transfer", "submit", "confirm", "order", "purchase"))
+            ):
+                req.risk_level = SecurityRiskLevel.HIGH
+                req.action_type = "Financial Transaction Control"
+                req.reason = f"Clicking financial transaction control '{info.name if info else elem_id}' may trigger real monetary charges."
+                return req
+
+            delete_terms = ("delete", "permanently delete", "empty recycle bin", "erase", "format", "uninstall", "destroy", "remove all")
+            if any(term in elem_name for term in delete_terms):
+                req.risk_level = SecurityRiskLevel.HIGH
+                req.action_type = "Destructive Action Control"
+                req.reason = f"Clicking destructive control '{info.name if info else elem_id}' may result in permanent data loss."
+                return req
+
+            comms_apps = ("outlook", "mail", "gmail", "thunderbird", "teams", "slack", "whatsapp", "message")
+            send_terms = ("send", "publish", "post", "submit message", "broadcast")
+            if (any(app in win_title for app in comms_apps) and any(term in elem_name for term in send_terms)) or elem_name in ("send", "publish", "post"):
+                req.risk_level = SecurityRiskLevel.HIGH
+                req.action_type = "External Communication Control"
+                req.reason = f"Clicking '{info.name if info else elem_id}' transmits external communications or publishes content."
+                return req
+
+            # 3. Moderate Risk Check: Overwrite / Save As / Settings modification
+            if any(term in elem_name for term in ("save as", "overwrite", "replace", "apply settings", "reset to default", "install")):
+                req.risk_level = SecurityRiskLevel.MODERATE
+                req.action_type = "Configuration / File Modification"
+                req.reason = f"Clicking '{info.name if info else elem_id}' may overwrite existing files or modify application settings."
+                return req
+
+            # 4. Low Risk: Ordinary navigation, menus, basic buttons
+            req.risk_level = SecurityRiskLevel.LOW
+            req.action_type = "UI Interaction"
+            req.reason = f"Standard interactive navigation for control '{info.name if info else elem_id}'."
+            return req
+
+        if clean_tool == "set_control_text":
+            from bolt.windows.ui_automation import get_interactive_element_registry
+            reg = get_interactive_element_registry()
+            elem_id = params.get("element_id")
+            text_val = str(params.get("text", ""))
+            info = reg.get_element(elem_id)
+            win_title = (reg.window_title or "").lower()
+            elem_name = (info.name if info else "").lower()
+
+            target_desc = f"Text Control [{elem_id}] '{info.name if info else 'Unknown'}' in '{reg.window_title or 'Active Window'}'"
+            req.target = target_desc
+            req.proposed_changes = text_val[:200]
+
+            # High risk: entering credentials or sensitive fields
+            if (info and info.is_password) or any(w in elem_name for w in ("password", "pin", "api key", "secret", "cvv", "credit card")):
+                req.risk_level = SecurityRiskLevel.HIGH
+                req.action_type = "Sensitive Credential Entry"
+                req.reason = "Entering text into a password or sensitive security field requires explicit approval."
+                return req
+
+            # Moderate risk: command injection in terminal/cmd
+            if any(term in win_title for term in ("command prompt", "powershell", "terminal", "cmd.exe")):
+                req.risk_level = SecurityRiskLevel.MODERATE
+                req.action_type = "Terminal Command Input"
+                req.reason = f"Injecting command text '{text_val[:60]}' into active system terminal."
+                return req
+
+            # Low risk: Standard text entry (Notepad, search box, calculator, forms)
+            req.risk_level = SecurityRiskLevel.LOW
+            req.action_type = "Text Input"
+            req.reason = f"Entering text into document/field '{info.name if info else elem_id}'."
+            return req
+
         # -------------------------------------------------------------
         # 4. LOW RISK (Level 1): Automatic execution
         # -------------------------------------------------------------

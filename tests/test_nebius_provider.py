@@ -33,12 +33,11 @@ class TestNebiusProvider(unittest.TestCase):
         """Verify provider metadata adheres to official Nebius specifications."""
         self.assertEqual(self.provider.provider_name, "nebius")
         self.assertEqual(self.provider.display_name, "Nebius Token Factory")
-        self.assertEqual(self.provider.default_model, "meta-llama/Meta-Llama-3.1-70B-Instruct")
+        self.assertEqual(self.provider.default_model, DEFAULT_NEBIUS_MODEL)
         self.assertEqual(self.provider.base_url, "https://api.tokenfactory.nebius.com/v1")
         self.assertFalse(self.provider.is_configured)
-        self.assertIn("meta-llama/Meta-Llama-3.1-70B-Instruct", self.provider.available_models)
-        self.assertIn("Qwen/Qwen2.5-72B-Instruct", self.provider.available_models)
-        self.assertIn("deepseek-ai/DeepSeek-V3", self.provider.available_models)
+        self.assertIn(DEFAULT_NEBIUS_MODEL, self.provider.available_models)
+        self.assertIn("deepseek-ai/DeepSeek-V4-Flash-0731", self.provider.available_models)
 
     def test_02_connection_test_without_key(self):
         """Verify connection test gracefully fails with a clear message when key is not set."""
@@ -99,13 +98,17 @@ class TestNebiusProvider(unittest.TestCase):
     def test_07_offline_first_fallback(self):
         """Verify switching to Nebius without key gracefully preserves local model operation."""
         pm = get_provider_manager()
-        ok, msg = pm.switch_default_provider("nebius")
-        self.assertTrue(ok)
-        self.assertIn("Notice", msg)
-        self.assertIn("Local AI", msg)
-
-        # Restore default to ollama
-        pm.switch_default_provider(PROVIDER_OLLAMA)
+        nebius_p = pm.get_provider("nebius")
+        saved_key = nebius_p.api_key
+        try:
+            nebius_p.api_key = ""
+            ok, msg = pm.switch_default_provider("nebius")
+            self.assertTrue(ok)
+            self.assertIn("Notice", msg)
+            self.assertIn("Local AI", msg)
+        finally:
+            nebius_p.api_key = saved_key
+            pm.switch_default_provider(PROVIDER_OLLAMA)
 
     def test_08_settings_persistence(self):
         """Verify Nebius settings fields exist and can be persisted."""
@@ -118,3 +121,4 @@ class TestNebiusProvider(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

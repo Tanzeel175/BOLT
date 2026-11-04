@@ -185,12 +185,16 @@ class TestPhase9SecuritySystem(unittest.TestCase):
         self.assertTrue(ok)
         self.assertTrue(token.startswith("tok_"))
 
-        # Re-execute with approval token succeeds
+        # Re-execute with approval token: security authorizes execution, but unconfigured handler returns not_configured
         res = self.tool_reg.execute_tool("send_email", approval_token=token, **params)
-        self.assertTrue(res.get("success"))
+        self.assertFalse(res.get("requires_approval", False))
+        self.assertFalse(res.get("blocked", False))
+        self.assertFalse(res.get("success"))
+        self.assertEqual(res.get("status"), "not_configured")
+        self.assertEqual(res.get("error"), "Email sending is not configured. No email was sent.")
         self.assertEqual(res.get("recipient"), "advisor@university.edu")
 
-        print("[OK] test_05: Level 3 send email blocked pending explicit approval, executed upon authorization.")
+        print("[OK] test_05: Level 3 send email blocked pending explicit approval, executed upon authorization (unconfigured email returns not_configured).")
 
     # -------------------------------------------------------------
     # 6. Level 3 High Risk: Delete File

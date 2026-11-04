@@ -21,11 +21,16 @@ class NebiusProvider(AIProvider):
 
     def __init__(
         self,
-        api_key: str = "",
+        api_key: Optional[str] = None,
         model: str = DEFAULT_NEBIUS_MODEL,
         base_url: str = DEFAULT_NEBIUS_BASE_URL,
     ):
-        self.api_key = (api_key or "").strip()
+        import os
+        if api_key is None:
+            raw_key = os.getenv("Nebius_API_key") or os.getenv("NEBIUS_API_KEY") or ""
+        else:
+            raw_key = api_key
+        self.api_key = raw_key.strip()
         self.model = (model or "").strip() or DEFAULT_NEBIUS_MODEL
         self.base_url = (base_url or "").strip().rstrip("/") or DEFAULT_NEBIUS_BASE_URL
 
@@ -227,7 +232,7 @@ class NebiusProvider(AIProvider):
                 )
 
             message_obj = choices[0].get("message", {})
-            content = message_obj.get("content", "") or ""
+            content = message_obj.get("content", "") or message_obj.get("reasoning_content", "") or message_obj.get("reasoning", "") or ""
             usage = data.get("usage", {})
             prompt_tokens = usage.get("prompt_tokens", 0)
             completion_tokens = usage.get("completion_tokens", 0)

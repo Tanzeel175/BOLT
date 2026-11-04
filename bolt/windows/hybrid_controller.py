@@ -233,6 +233,97 @@ class HybridController:
             "execution_time_ms": elapsed_ms,
         }
 
+    def inspect_active_window_controls(
+        self,
+        window_query: Optional[str] = None,
+        max_depth: int = 5,
+        max_controls: int = 35,
+    ) -> Dict[str, Any]:
+        """
+        Enumerate accessible controls in active or target window, assign sequential IDs [1], [2], [3]...
+        ZERO screenshots captured.
+        """
+        start = time.perf_counter()
+        try:
+            res = self.uia.inspect_active_window_controls(
+                window_query=window_query, max_depth=max_depth, max_controls=max_controls
+            )
+        except Exception as e:
+            res = {"success": False, "error": str(e), "formatted_controls": "", "controls": []}
+
+        elapsed_ms = (time.perf_counter() - start) * 1000
+
+        # If window found but has ZERO accessible controls (e.g. raw OpenGL/canvas), note availability of visual fallback
+        if res.get("success") and res.get("control_count", 0) == 0:
+            logger.info("Window exposes no accessible controls; visual screenshot fallback is available on demand.")
+
+        return {
+            **res,
+            "method_used": "ui_automation",
+            "screenshot_taken": False,
+            "execution_time_ms": elapsed_ms,
+        }
+
+    def click_control_by_id(self, element_id: int) -> Dict[str, Any]:
+        """
+        Click or invoke an interactive control by assigned ID [1], [2], [3]...
+        ZERO screenshots captured unless UIA invocation fails completely.
+        """
+        start = time.perf_counter()
+        try:
+            res = self.uia.click_control_by_id(element_id)
+        except Exception as e:
+            res = {"success": False, "error": str(e)}
+
+        elapsed_ms = (time.perf_counter() - start) * 1000
+
+        if res.get("success"):
+            return {
+                **res,
+                "screenshot_taken": False,
+                "execution_time_ms": elapsed_ms,
+            }
+
+        # If failed due to stale state, return immediately without capturing screenshot
+        if res.get("stale_state"):
+            return {
+                **res,
+                "screenshot_taken": False,
+                "execution_time_ms": elapsed_ms,
+            }
+
+        # Fallback to Screenshot-on-Demand only if UIA failed
+        logger.info(f"UI Automation invocation failed for control [{element_id}], activating visual diagnosis fallback.")
+        diag = self.vision.diagnose_visual_error()
+
+        return {
+            "success": False,
+            "error": res.get("error"),
+            "fallback_visual_diagnosis": diag,
+            "method_used": "screenshot_on_demand_fallback",
+            "screenshot_taken": True,
+            "execution_time_ms": (time.perf_counter() - start) * 1000,
+        }
+
+    def set_control_text(self, element_id: int, text: str) -> Dict[str, Any]:
+        """
+        Set text into an accessible text field by assigned ID [1], [2], [3]...
+        ZERO screenshots captured.
+        """
+        start = time.perf_counter()
+        try:
+            res = self.uia.set_control_text(element_id, text)
+        except Exception as e:
+            res = {"success": False, "error": str(e)}
+
+        elapsed_ms = (time.perf_counter() - start) * 1000
+
+        return {
+            **res,
+            "screenshot_taken": False,
+            "execution_time_ms": elapsed_ms,
+        }
+
     # -------------------------------------------------------------
     # 3. KEYBOARD SHORTCUTS & STRUCTURED MOUSE (Priority 3)
     # -------------------------------------------------------------

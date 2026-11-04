@@ -170,13 +170,15 @@ class AIProviderManager:
 
         is_default = (self.settings.provider.lower() == p.provider_name)
         key = (
-            self.settings.gemini_api_key if p.provider_name == PROVIDER_GEMINI
+            self.settings.nebius_api_key if p.provider_name == PROVIDER_NEBIUS
+            else self.settings.gemini_api_key if p.provider_name == PROVIDER_GEMINI
             else self.settings.openai_api_key if p.provider_name == PROVIDER_OPENAI
             else self.settings.custom_api_key if p.provider_name == PROVIDER_CUSTOM
             else ""
         )
         selected_model = (
             self.settings.ollama_model if p.provider_name == PROVIDER_OLLAMA
+            else self.settings.nebius_model if p.provider_name == PROVIDER_NEBIUS
             else self.settings.gemini_model if p.provider_name == PROVIDER_GEMINI
             else self.settings.openai_model if p.provider_name == PROVIDER_OPENAI
             else self.settings.custom_model if p.provider_name == PROVIDER_CUSTOM

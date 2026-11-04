@@ -78,7 +78,7 @@ class Settings:
         except ValueError:
             ollama_cpu_threads = 8
 
-        nebius_api_key = os.getenv("NEBIUS_API_KEY", "").strip()
+        nebius_api_key = (os.getenv("Nebius_API_key") or os.getenv("NEBIUS_API_KEY") or "").strip()
         nebius_model = os.getenv("NEBIUS_MODEL", DEFAULT_NEBIUS_MODEL).strip()
         nebius_base_url = os.getenv("NEBIUS_BASE_URL", DEFAULT_NEBIUS_BASE_URL).strip()
 

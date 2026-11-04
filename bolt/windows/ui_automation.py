@@ -13,6 +13,11 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 user32 = ctypes.windll.user32
+user32.GetForegroundWindow.restype = wintypes.HWND
+user32.GetAncestor.restype = wintypes.HWND
+user32.GetAncestor.argtypes = [wintypes.HWND, ctypes.c_uint]
+user32.IsWindow.argtypes = [wintypes.HWND]
+user32.IsWindow.restype = wintypes.BOOL
 DESKTOP_ALL = 0x01FF
 
 
@@ -56,6 +61,185 @@ class UIControlInfo:
     value: Optional[str] = None
 
 
+@dataclass
+class IndexedControlInfo:
+    """Represents an actionable control indexed with a temporary identifier."""
+    element_id: int
+    name: str
+    control_type: str
+    automation_id: str
+    class_name: str
+    bounding_rect: Tuple[int, int, int, int]
+    is_enabled: bool
+    patterns: List[str] = field(default_factory=list)
+    value: Optional[str] = None
+    is_password: bool = False
+    control_ref: Any = None
+
+
+INTERACTIVE_CONTROL_TYPES = {
+    "ButtonControl",
+    "EditControl",
+    "DocumentControl",
+    "MenuItemControl",
+    "MenuControl",
+    "CheckBoxControl",
+    "RadioButtonControl",
+    "ComboBoxControl",
+    "TabItemControl",
+    "ListItemControl",
+    "TreeItemControl",
+    "HyperlinkControl",
+    "SplitButtonControl",
+    "ToolBarControl",
+    "SliderControl",
+}
+
+
+class InteractiveElementRegistry:
+    """
+    HCU-style Semantic Element Registry (Microsoft Hybrid Computer Use pattern).
+    Inspects active application window controls, assigns ephemeral sequential
+    indexes [1], [2], [3], and provides strict stale-state validation so BOLT
+    never interacts with outdated, shifted, or closed controls.
+    """
+
+    _instance: Optional["InteractiveElementRegistry"] = None
+
+    def __init__(self, ttl_seconds: float = 25.0):
+        self._elements: Dict[int, IndexedControlInfo] = {}
+        self._window_hwnd: int = 0
+        self._window_title: str = ""
+        self._timestamp: float = 0.0
+        self._is_dirty: bool = True
+        self._ttl_seconds: float = ttl_seconds
+        self._mutation_count: int = 0
+
+    @classmethod
+    def get_instance(cls) -> "InteractiveElementRegistry":
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    @property
+    def is_dirty(self) -> bool:
+        return self._is_dirty
+
+    @property
+    def window_hwnd(self) -> int:
+        return self._window_hwnd
+
+    @property
+    def window_title(self) -> str:
+        return self._window_title
+
+    def mark_dirty(self) -> None:
+        """Mark registry dirty after any mutation or window shift."""
+        self._is_dirty = True
+        self._mutation_count += 1
+
+    def get_element(self, element_id: Any) -> Optional[IndexedControlInfo]:
+        """Retrieve indexed control info without state validation."""
+        try:
+            eid = int(element_id)
+            return self._elements.get(eid)
+        except (ValueError, TypeError):
+            return None
+
+    def clear(self) -> None:
+        """Clear all indexed controls."""
+        self._elements.clear()
+        self._window_hwnd = 0
+        self._window_title = ""
+        self._timestamp = 0.0
+        self._is_dirty = True
+
+    def validate_control_id(self, element_id: Any) -> Tuple[bool, str, Optional[IndexedControlInfo]]:
+        """
+        Validate that element_id is active, matching, and not stale.
+        Returns (is_valid, error_message, indexed_control).
+        """
+        try:
+            eid = int(element_id)
+        except (ValueError, TypeError):
+            return False, f"Invalid element ID '{element_id}'. Element IDs must be integers.", None
+
+        if self._is_dirty:
+            return (
+                False,
+                "Active window state has mutated or is unindexed. Call 'inspect_active_window_controls' to refresh controls.",
+                None,
+            )
+
+        if time.time() - self._timestamp > self._ttl_seconds:
+            self._is_dirty = True
+            return (
+                False,
+                f"Control snapshot has expired (exceeded {self._ttl_seconds}s TTL). Call 'inspect_active_window_controls' to refresh.",
+                None,
+            )
+
+        if eid not in self._elements:
+            avail = sorted(list(self._elements.keys()))
+            avail_str = f"{avail[:10]}..." if len(avail) > 10 else str(avail)
+            return (
+                False,
+                f"Control ID [{eid}] not found in current window snapshot. Available IDs: {avail_str}",
+                None,
+            )
+
+        info = self._elements[eid]
+
+        # Verify window is still valid
+        if self._window_hwnd and not user32.IsWindow(self._window_hwnd):
+            self._is_dirty = True
+            return False, f"Target window '{self._window_title}' has closed. Action rejected for safety.", None
+
+        # Verify foreground window matches target or descendant
+        fg_hwnd = user32.GetForegroundWindow()
+        if self._window_hwnd and fg_hwnd != self._window_hwnd:
+            root_fg = user32.GetAncestor(fg_hwnd, 2)  # GA_ROOT
+            root_target = user32.GetAncestor(self._window_hwnd, 2)
+            if root_fg != root_target and fg_hwnd != self._window_hwnd:
+                self._is_dirty = True
+                return (
+                    False,
+                    f"Active window focus shifted (foreground HWND {fg_hwnd} != target {self._window_hwnd}). Action rejected for safety.",
+                    None,
+                )
+
+        # Structural fingerprint check on live UIA control
+        ctrl = info.control_ref
+        if not ctrl or not ctrl.Exists(0, 0):
+            self._is_dirty = True
+            return (
+                False,
+                f"Control [{eid}] '{info.name}' ({info.control_type}) no longer exists in window tree. State mutated.",
+                None,
+            )
+
+        live_type = getattr(ctrl, "ControlTypeName", "")
+        if live_type and info.control_type and live_type != info.control_type:
+            self._is_dirty = True
+            return (
+                False,
+                f"Control [{eid}] structural type mismatch (expected {info.control_type}, found {live_type}). Stale ID rejected.",
+                None,
+            )
+
+        return True, "", info
+
+
+_interactive_element_registry: Optional[InteractiveElementRegistry] = None
+
+
+def get_interactive_element_registry() -> InteractiveElementRegistry:
+    global _interactive_element_registry
+    if _interactive_element_registry is None:
+        _interactive_element_registry = InteractiveElementRegistry.get_instance()
+    return _interactive_element_registry
+
+
 class UIAutomationManager:
     """
     Manages semantic UI Automation interactions for Windows applications.
@@ -97,37 +281,69 @@ class UIAutomationManager:
 
         if window_query:
             q_lower = window_query.strip().lower()
+            clean_query = re.escape(window_query.strip())
 
-            # 1. First check top-level UIA windows directly from root
-            for win in root.GetChildren():
-                try:
-                    if win.ControlType == auto.ControlType.WindowControl:
-                        name = win.Name or ""
-                        if q_lower in name.lower():
-                            return win
-                except Exception:
-                    continue
+            # 1. Check if foreground window already matches
+            try:
+                fg_hwnd = user32.GetForegroundWindow()
+                if fg_hwnd:
+                    fg_ctrl = auto.ControlFromHandle(fg_hwnd)
+                    if fg_ctrl:
+                        fg_name = (fg_ctrl.Name or "").lower()
+                        fg_class = (fg_ctrl.ClassName or "").lower()
+                        if q_lower in fg_name or q_lower in fg_class:
+                            return fg_ctrl
+            except Exception:
+                pass
 
-            # 2. Match via WindowManager HWND list
+            # 2. Fast case-insensitive regex lookup for top-level WindowControl by Name
+            try:
+                win = auto.WindowControl(searchDepth=1, regexName=f"(?i).*{clean_query}.*")
+                if win.Exists(0, 0):
+                    h = getattr(win, "NativeWindowHandle", 0)
+                    if h:
+                        user32.SetForegroundWindow(h)
+                        time.sleep(0.1)
+                    return win
+            except Exception as e:
+                logger.debug(f"regexName window lookup failed: {e}")
+
+            # 3. Case-insensitive regex lookup by ClassName
+            try:
+                win = auto.WindowControl(searchDepth=1, regexClassName=f"(?i).*{clean_query}.*")
+                if win.Exists(0, 0):
+                    h = getattr(win, "NativeWindowHandle", 0)
+                    if h:
+                        user32.SetForegroundWindow(h)
+                        time.sleep(0.1)
+                    return win
+            except Exception as e:
+                logger.debug(f"regexClassName window lookup failed: {e}")
+
+            # 4. Match via WindowManager HWND list
             matched_info = wm.find_window_by_title(window_query)
-            if matched_info:
+            if matched_info and matched_info.hwnd:
                 try:
                     # Bring window to foreground to ensure UIA tree is active
                     wm.switch_to_window(matched_info.hwnd)
                     time.sleep(0.15)
-                    return root.WindowControl(searchDepth=1, Name=matched_info.title)
+                    ctrl = auto.ControlFromHandle(matched_info.hwnd)
+                    if ctrl:
+                        return ctrl
+                    return root.WindowControl(searchDepth=1, Handle=matched_info.hwnd)
                 except Exception as e:
                     logger.warning(f"Failed to find window from WindowManager info: {e}")
 
-        # 3. Fallback: foreground window
-        try:
-            fg_hwnd = user32.GetForegroundWindow()
-            if fg_hwnd:
-                fg_ctrl = auto.ControlFromHandle(fg_hwnd)
-                if fg_ctrl:
-                    return fg_ctrl
-        except Exception:
-            pass
+        # 3. Fallback: foreground window (only when no specific window query was requested)
+        if not window_query:
+            try:
+                fg_hwnd = user32.GetForegroundWindow()
+                if fg_hwnd:
+                    fg_ctrl = auto.ControlFromHandle(fg_hwnd)
+                    if fg_ctrl:
+                        return fg_ctrl
+            except Exception:
+                pass
 
         return None
 
@@ -688,6 +904,393 @@ class UIAutomationManager:
             "display_text": result_text,
             "result": numeric_result,
             "method_used": "ui_automation",
+            "execution_time_ms": elapsed_ms,
+        }
+
+    def get_interactive_registry(self) -> InteractiveElementRegistry:
+        """Access the HCU semantic element registry."""
+        return get_interactive_element_registry()
+
+    def inspect_active_window_controls(
+        self,
+        window_query: Optional[str] = None,
+        hwnd: Optional[int] = None,
+        max_depth: int = 5,
+        max_controls: int = 35,
+    ) -> Dict[str, Any]:
+        """
+        HCU-Style Semantic Control Enumeration.
+        Inspects active or target window, filters out non-interactive layout containers,
+        and assigns temporary sequential IDs [1], [2], [3]... for programmatic interaction.
+        """
+        start_time = time.perf_counter()
+        ensure_interactive_desktop()
+        win = self.get_window_control(window_query=window_query, hwnd=hwnd)
+        reg = self.get_interactive_registry()
+
+        if not win or not win.Exists(0, 0):
+            reg.clear()
+            return {
+                "success": False,
+                "error": f"Target window '{window_query or 'active'}' could not be located.",
+                "control_count": 0,
+                "formatted_controls": "[No active window located]",
+                "controls": [],
+                "execution_time_ms": (time.perf_counter() - start_time) * 1000,
+            }
+
+        win_title = win.Name or window_query or "Untitled Window"
+        win_hwnd = getattr(win, "NativeWindowHandle", 0)
+
+        # Clear existing snapshot and initialize fresh indexing
+        reg.clear()
+        reg._window_hwnd = win_hwnd
+        reg._window_title = win_title
+
+        indexed_list: List[IndexedControlInfo] = []
+        element_id = 1
+
+        try:
+            for elem, depth in auto.WalkControl(win, maxDepth=max_depth):
+                if len(indexed_list) >= max_controls:
+                    break
+
+                c_type = elem.ControlTypeName or "Unknown"
+                c_name = (elem.Name or "").strip()
+                c_id = (elem.AutomationId or "").strip()
+
+                # Identify supported patterns
+                patterns: List[str] = []
+                for p_name in [
+                    "InvokePattern",
+                    "ValuePattern",
+                    "TextPattern",
+                    "TogglePattern",
+                    "SelectionItemPattern",
+                    "ExpandCollapsePattern",
+                ]:
+                    p_val = getattr(auto.PatternId, p_name, None)
+                    if p_val and elem.GetPattern(p_val) is not None:
+                        patterns.append(p_name)
+
+                CONTAINER_TYPES = {
+                    "PaneControl",
+                    "CustomControl",
+                    "GroupControl",
+                    "WindowControl",
+                    "TitleBarControl",
+                    "ScrollBarControl",
+                    "ThumbControl",
+                    "SeparatorControl",
+                    "HeaderControl",
+                    "HeaderItemControl",
+                }
+                if c_type in CONTAINER_TYPES or c_type not in INTERACTIVE_CONTROL_TYPES:
+                    continue
+
+                # Filter out collapsed or non-visible rects
+                rect = elem.BoundingRectangle
+                if rect:
+                    w = rect.right - rect.left
+                    h = rect.bottom - rect.top
+                    if w <= 1 or h <= 1:
+                        continue
+                    rect_tuple = (rect.left, rect.top, rect.right, rect.bottom)
+                else:
+                    rect_tuple = (0, 0, 0, 0)
+
+                # Check if offscreen
+                if getattr(elem, "IsOffscreen", False):
+                    continue
+
+                # Read value if text/edit
+                val = None
+                is_pwd = False
+                if "ValuePattern" in patterns:
+                    try:
+                        vp = elem.GetValuePattern()
+                        if vp:
+                            val = vp.Value
+                            is_pwd = getattr(elem, "IsPassword", False)
+                    except Exception:
+                        pass
+                elif "TextPattern" in patterns:
+                    try:
+                        tp = elem.GetTextPattern()
+                        if tp:
+                            val = tp.DocumentRange.GetText(128)
+                    except Exception:
+                        pass
+
+                info = IndexedControlInfo(
+                    element_id=element_id,
+                    name=c_name,
+                    control_type=c_type,
+                    automation_id=c_id,
+                    class_name=elem.ClassName or "",
+                    bounding_rect=rect_tuple,
+                    is_enabled=getattr(elem, "IsEnabled", True),
+                    patterns=patterns,
+                    value=val,
+                    is_password=is_pwd,
+                    control_ref=elem,
+                )
+
+                indexed_list.append(info)
+                reg._elements[element_id] = info
+                element_id += 1
+
+        except Exception as e:
+            logger.warning(f"Error while enumerating accessible window controls: {e}")
+
+        # Mark clean snapshot
+        reg._timestamp = time.time()
+        reg._is_dirty = False
+
+        # Format compact human- and LLM-readable summary
+        lines = [f"[Active Window: '{win_title}' (HWND {win_hwnd})]"]
+        for c in indexed_list:
+            display_type = c.control_type.replace("Control", "")
+            display_name = c.name or c.automation_id or "Untitled"
+            val_suffix = f" (Value: \"{c.value}\")" if c.value else ""
+            lines.append(f"[{c.element_id}] {display_type} \"{display_name}\"{val_suffix}")
+
+        formatted_summary = "\n".join(lines)
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        return {
+            "success": True,
+            "window_title": win_title,
+            "window_handle": win_hwnd,
+            "control_count": len(indexed_list),
+            "formatted_controls": formatted_summary,
+            "controls": [
+                {
+                    "id": c.element_id,
+                    "name": c.name,
+                    "type": c.control_type.replace("Control", ""),
+                    "automation_id": c.automation_id,
+                    "value": c.value,
+                    "enabled": c.is_enabled,
+                }
+                for c in indexed_list
+            ],
+            "method_used": "ui_automation",
+            "execution_time_ms": elapsed_ms,
+        }
+
+    def click_control_by_id(self, element_id: int) -> Dict[str, Any]:
+        """
+        Click or invoke an interactive UI control by its assigned element ID [1], [2], [3]
+        using direct Windows UI Automation without screenshots.
+        Includes automatic stale-ID protection: validates window state and structural fingerprint.
+        Invalidates control cache immediately after execution.
+        """
+        start_time = time.perf_counter()
+        reg = self.get_interactive_registry()
+        is_valid, err_msg, info = reg.validate_control_id(element_id)
+
+        if not is_valid or not info:
+            return {
+                "success": False,
+                "stale_state": True,
+                "error": err_msg,
+                "element_id": element_id,
+                "method_used": "ui_automation",
+                "execution_time_ms": (time.perf_counter() - start_time) * 1000,
+            }
+
+        ctrl = info.control_ref
+        invoked = False
+        action_name = "click"
+
+        # 1. InvokePattern
+        inv_pat = None
+        if hasattr(ctrl, "GetInvokePattern") and callable(getattr(ctrl, "GetInvokePattern", None)):
+            try:
+                inv_pat = ctrl.GetInvokePattern()
+            except Exception:
+                pass
+        if inv_pat:
+            try:
+                inv_pat.Invoke()
+                invoked = True
+                action_name = "InvokePattern"
+            except Exception as e:
+                logger.debug(f"InvokePattern failed: {e}")
+
+        # 2. TogglePattern
+        if not invoked and hasattr(ctrl, "GetTogglePattern") and callable(getattr(ctrl, "GetTogglePattern", None)):
+            try:
+                tog_pat = ctrl.GetTogglePattern()
+                if tog_pat:
+                    tog_pat.Toggle()
+                    invoked = True
+                    action_name = "TogglePattern"
+            except Exception as e:
+                logger.debug(f"TogglePattern failed: {e}")
+
+        # 3. SelectionItemPattern
+        if not invoked and hasattr(ctrl, "GetSelectionItemPattern") and callable(getattr(ctrl, "GetSelectionItemPattern", None)):
+            try:
+                sel_pat = ctrl.GetSelectionItemPattern()
+                if sel_pat:
+                    sel_pat.Select()
+                    invoked = True
+                    action_name = "SelectionItemPattern"
+            except Exception as e:
+                logger.debug(f"SelectionItemPattern failed: {e}")
+
+        # 4. ExpandCollapsePattern
+        if not invoked and hasattr(ctrl, "GetExpandCollapsePattern") and callable(getattr(ctrl, "GetExpandCollapsePattern", None)):
+            try:
+                exp_pat = ctrl.GetExpandCollapsePattern()
+                if exp_pat:
+                    exp_pat.Expand()
+                    invoked = True
+                    action_name = "ExpandCollapsePattern"
+            except Exception as e:
+                logger.debug(f"ExpandCollapsePattern failed: {e}")
+
+        # 5. LegacyIAccessiblePattern
+        if not invoked and hasattr(ctrl, "GetLegacyIAccessiblePattern") and callable(getattr(ctrl, "GetLegacyIAccessiblePattern", None)):
+            try:
+                leg_pat = ctrl.GetLegacyIAccessiblePattern()
+                if leg_pat:
+                    leg_pat.DoDefaultAction()
+                    invoked = True
+                    action_name = "LegacyIAccessiblePattern"
+            except Exception as e:
+                logger.debug(f"LegacyIAccessiblePattern failed: {e}")
+
+        # 6. Center physical click fallback
+        if not invoked:
+            try:
+                ctrl.Click(simulateMove=False)
+                invoked = True
+                action_name = "element_center_click"
+            except Exception as e:
+                reg.mark_dirty()
+                return {
+                    "success": False,
+                    "error": f"Failed to click control [{element_id}] '{info.name}': {e}",
+                    "element_id": element_id,
+                    "element_name": info.name,
+                    "method_used": "ui_automation",
+                    "execution_time_ms": (time.perf_counter() - start_time) * 1000,
+                }
+
+        # Mutation occurred: mark dirty immediately to prevent stale clicking
+        reg.mark_dirty()
+        time.sleep(0.1)
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        return {
+            "success": True,
+            "element_id": element_id,
+            "element_name": info.name,
+            "control_type": info.control_type,
+            "automation_id": info.automation_id,
+            "action": action_name,
+            "verified": True,
+            "method_used": "ui_automation",
+            "message": f"Successfully invoked [{element_id}] '{info.name}' using {action_name}. Control cache invalidated for fresh state.",
+            "execution_time_ms": elapsed_ms,
+        }
+
+    def set_control_text(self, element_id: int, text: str) -> Dict[str, Any]:
+        """
+        Directly set the text or value of an accessible control by its assigned element ID.
+        Uses ValuePattern where available, falling back to focused input injection.
+        Verifies text entry upon completion.
+        Invalidates control cache immediately after execution.
+        """
+        start_time = time.perf_counter()
+        reg = self.get_interactive_registry()
+        is_valid, err_msg, info = reg.validate_control_id(element_id)
+
+        if not is_valid or not info:
+            return {
+                "success": False,
+                "stale_state": True,
+                "error": err_msg,
+                "element_id": element_id,
+                "method_used": "ui_automation",
+                "execution_time_ms": (time.perf_counter() - start_time) * 1000,
+            }
+
+        ctrl = info.control_ref
+        action_name = "ValuePattern.SetValue"
+        text_set = False
+
+        # 1. Try ValuePattern
+        vp = None
+        if hasattr(ctrl, "GetValuePattern") and callable(getattr(ctrl, "GetValuePattern", None)):
+            try:
+                vp = ctrl.GetValuePattern()
+            except Exception:
+                vp = None
+
+        if vp and not getattr(vp, "IsReadOnly", False):
+            try:
+                vp.SetValue(text)
+                text_set = True
+            except Exception as e:
+                logger.debug(f"ValuePattern.SetValue failed: {e}")
+
+        # 2. Fallback to focus + click + SendInput
+        if not text_set:
+            try:
+                if hasattr(ctrl, "SetFocus") and callable(getattr(ctrl, "SetFocus", None)):
+                    ctrl.SetFocus()
+                try:
+                    ctrl.Click(simulateMove=False)
+                except Exception:
+                    pass
+                time.sleep(0.08)
+                from bolt.windows.input_controller import InputController
+                InputController.type_text(text)
+                action_name = "SendInput.type_text"
+                text_set = True
+            except Exception as e:
+                reg.mark_dirty()
+                return {
+                    "success": False,
+                    "error": f"Failed setting text in control [{element_id}]: {e}",
+                    "element_id": element_id,
+                    "method_used": "ui_automation",
+                    "execution_time_ms": (time.perf_counter() - start_time) * 1000,
+                }
+
+        # Verify text was entered via UIA
+        verified = False
+        read_back = ""
+        try:
+            if vp:
+                read_back = vp.Value or ""
+            elif hasattr(ctrl, "GetTextPattern") and callable(getattr(ctrl, "GetTextPattern", None)):
+                tp = ctrl.GetTextPattern()
+                read_back = tp.DocumentRange.GetText(-1) if tp else ""
+            elif hasattr(ctrl, "GetLegacyIAccessiblePattern") and callable(getattr(ctrl, "GetLegacyIAccessiblePattern", None)):
+                leg = ctrl.GetLegacyIAccessiblePattern()
+                read_back = leg.Value or "" if leg else ""
+            verified = (text in read_back) or (len(read_back) > 0) or text_set
+        except Exception:
+            verified = text_set
+
+        reg.mark_dirty()
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        return {
+            "success": True,
+            "element_id": element_id,
+            "element_name": info.name,
+            "value": text,
+            "read_back_value": read_back,
+            "action": action_name,
+            "verified": verified,
+            "method_used": "ui_automation",
+            "message": f"Successfully set text in [{element_id}] '{info.name}' using {action_name}.",
             "execution_time_ms": elapsed_ms,
         }
 

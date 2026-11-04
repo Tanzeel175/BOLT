@@ -811,6 +811,77 @@ class ToolRegistry:
             handler=lambda expression="125 * 25": get_hybrid_controller().calculate_accessible(expression),
         )
 
+        # ---------------- HCU Semantic Accessibility Tools ----------------
+        self.register_tool(
+            name="inspect_active_window_controls",
+            description=(
+                "Inspect the active or target application window and return a compact, numbered list of "
+                "actionable interactive controls (buttons, text fields, menu items, tabs, checkboxes) with IDs "
+                "[1], [2], [3] without capturing screenshots. Prepares the window state for direct programmatic interaction."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "window_query": {
+                        "type": "string",
+                        "description": "Optional title substring of the window to inspect. If omitted, inspects the active foreground window.",
+                    },
+                    "max_controls": {
+                        "type": "integer",
+                        "description": "Maximum number of actionable controls to index (default 35).",
+                    },
+                },
+            },
+            handler=lambda window_query="", max_controls=35: get_hybrid_controller().inspect_active_window_controls(
+                window_query=window_query or None, max_controls=int(max_controls) if max_controls else 35
+            ),
+        )
+
+        self.register_tool(
+            name="click_control_by_id",
+            description=(
+                "Click or invoke an interactive UI control (button, menu item, tab, checkbox) by its assigned element ID "
+                "[1], [2], [3] from the latest window inspection using direct Windows UI Automation. "
+                "Includes automatic stale-ID protection: validates window state and structural fingerprint. "
+                "Zero screenshots captured unless UI Automation invocation completely fails."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "element_id": {
+                        "type": "integer",
+                        "description": "The numeric ID of the control to click from the most recent window inspection.",
+                    },
+                },
+                "required": ["element_id"],
+            },
+            handler=lambda element_id: get_hybrid_controller().click_control_by_id(int(element_id)),
+        )
+
+        self.register_tool(
+            name="set_control_text",
+            description=(
+                "Enter or replace text directly into an accessible text box or document field by its assigned element ID "
+                "[1], [2], [3] without typing latency or screenshots. Verifies text state upon completion. "
+                "Includes automatic stale-ID protection."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "element_id": {
+                        "type": "integer",
+                        "description": "The numeric ID of the text field from the most recent window inspection.",
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "The exact text to set in the control.",
+                    },
+                },
+                "required": ["element_id", "text"],
+            },
+            handler=lambda element_id, text: get_hybrid_controller().set_control_text(int(element_id), str(text)),
+        )
+
         self.register_tool(
             name="ocr_screen_region",
             description="Perform local Windows Media OCR on a specific window or screen region on-demand without cloud AI.",
@@ -1090,13 +1161,7 @@ class ToolRegistry:
                 },
                 "required": ["recipient", "subject", "body"],
             },
-            handler=lambda recipient, subject, body: {
-                "success": True,
-                "recipient": recipient,
-                "subject": subject,
-                "status": "sent",
-                "message": f"Successfully sent email to '{recipient}' with subject '{subject}'.",
-            },
+            handler=self._send_email_handler,
         )
 
         self.register_tool(
@@ -1258,6 +1323,25 @@ class ToolRegistry:
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    def _send_email_handler(
+        self, recipient: str = "", subject: str = "", body: str = ""
+    ) -> Dict[str, Any]:
+        """
+        Handler for send_email tool.
+        Until a real email provider (SMTP/Gmail API) is configured, returns not_configured.
+        Never reports success or delivery when no email provider is integrated.
+        """
+        logger.warning(
+            f"send_email requested for '{recipient}', but no email provider is configured. No email was sent."
+        )
+        return {
+            "success": False,
+            "status": "not_configured",
+            "error": "Email sending is not configured. No email was sent.",
+            "recipient": recipient,
+            "subject": subject,
+        }
 
 
 _TOOL_REGISTRY: Optional[ToolRegistry] = None
