@@ -34,7 +34,7 @@ class Settings:
     ollama_model: str = DEFAULT_OLLAMA_MODEL
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_context_size: int = 2048
-    ollama_cpu_threads: int = 4
+    ollama_cpu_threads: int = 8
     gemini_api_key: str = ""
     gemini_model: str = DEFAULT_GEMINI_MODEL
     openai_api_key: str = ""
@@ -68,9 +68,9 @@ class Settings:
         except ValueError:
             ollama_context_size = 2048
         try:
-            ollama_cpu_threads = int(os.getenv("OLLAMA_CPU_THREADS", "4"))
+            ollama_cpu_threads = int(os.getenv("OLLAMA_CPU_THREADS", "8"))
         except ValueError:
-            ollama_cpu_threads = 4
+            ollama_cpu_threads = 8
 
         gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
         gemini_model = os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip()

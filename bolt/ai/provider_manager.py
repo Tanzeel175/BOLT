@@ -237,6 +237,13 @@ class AIProviderManager:
             logger.warning(f"Error persisting default provider in DB: {e}")
 
         logger.info(f"Switched default AI provider to: {target_provider.display_name}")
+        if not target_provider.is_configured and norm in (PROVIDER_OPENAI, PROVIDER_GEMINI, PROVIDER_CUSTOM):
+            return True, (
+                f"Switched default AI provider to **{target_provider.display_name}**.\n\n"
+                f"⚠️ **Notice:** No API key is currently saved for {target_provider.display_name}. "
+                f"BOLT will seamlessly route queries to **Local AI (Ollama)** until a valid key is entered in Settings (⚙), "
+                f"ensuring your computer control and chat tasks continue working offline without interruption."
+            )
         return True, f"Successfully switched default AI provider to **{target_provider.display_name}**."
 
     def set_provider_model(self, provider_name: str, model_name: str) -> Tuple[bool, str]:
@@ -359,10 +366,10 @@ class AIProviderManager:
 _PROVIDER_MGR_INSTANCE: Optional[AIProviderManager] = None
 
 
-def get_ai_provider_manager() -> AIProviderManager:
+def get_ai_provider_manager(reload: bool = False) -> AIProviderManager:
     """Singleton getter for AIProviderManager."""
     global _PROVIDER_MGR_INSTANCE
-    if _PROVIDER_MGR_INSTANCE is None:
+    if _PROVIDER_MGR_INSTANCE is None or reload:
         _PROVIDER_MGR_INSTANCE = AIProviderManager()
     return _PROVIDER_MGR_INSTANCE
 

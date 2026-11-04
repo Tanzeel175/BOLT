@@ -60,6 +60,18 @@ POPULAR_PRESETS: Dict[str, Dict[str, str]] = {
         "default_model": "local-model",
         "help_url": "http://127.0.0.1:1234",
     },
+    "xai": {
+        "name": "xAI (Grok)",
+        "base_url": "https://api.x.ai/v1",
+        "default_model": "grok-2",
+        "help_url": "https://console.x.ai",
+    },
+    "perplexity": {
+        "name": "Perplexity AI",
+        "base_url": "https://api.perplexity.ai",
+        "default_model": "sonar-pro",
+        "help_url": "https://www.perplexity.ai/settings/api",
+    },
 }
 
 

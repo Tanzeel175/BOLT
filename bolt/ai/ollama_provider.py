@@ -41,6 +41,9 @@ class OllamaProvider(AIProvider):
         self.cpu_threads = cpu_threads
         self._cached_models: List[str] = []
         self._last_models_fetch: float = 0.0
+        self._cached_installed: Optional[Tuple[bool, str]] = None
+        self._cached_running: Optional[Tuple[bool, str]] = None
+        self._last_running_fetch: float = 0.0
 
     @property
     def provider_name(self) -> str:
@@ -72,38 +75,69 @@ class OllamaProvider(AIProvider):
 
     def is_ollama_installed(self) -> Tuple[bool, str]:
         """Check if Ollama binary is installed on Windows system."""
+        if self._cached_installed is not None:
+            return self._cached_installed
+
         # Check PATH
         in_path = shutil.which("ollama")
         if in_path:
-            return True, in_path
+            self._cached_installed = (True, in_path)
+            return self._cached_installed
 
         # Check standard Windows installation directory
         local_app = os.environ.get("LOCALAPPDATA", "")
         if local_app:
             standard_path = pathlib.Path(local_app) / "Programs" / "Ollama" / "ollama.exe"
             if standard_path.exists():
-                return True, str(standard_path)
+                self._cached_installed = (True, str(standard_path))
+                return self._cached_installed
 
         prog_files = pathlib.Path(r"C:\Program Files\Ollama\ollama.exe")
         if prog_files.exists():
-            return True, str(prog_files)
+            self._cached_installed = (True, str(prog_files))
+            return self._cached_installed
 
-        return False, ""
+        self._cached_installed = (False, "")
+        return self._cached_installed
 
     def is_service_running(self) -> Tuple[bool, str]:
-        """Check if local Ollama daemon is currently listening on localhost."""
+        """Check if local Ollama daemon is currently listening on localhost with 15s caching."""
+        now = time.time()
+        if self._cached_running is not None and (now - self._last_running_fetch < 15.0):
+            return self._cached_running
+
         try:
-            resp = requests.get(f"{self.base_url}/api/tags", timeout=1.5)
+            resp = requests.get(f"{self.base_url}/api/tags", timeout=1.2)
             if resp.status_code == 200:
-                return True, "Ollama service is active and responding."
-            return False, f"Ollama HTTP status {resp.status_code}."
+                self._cached_running = (True, "Ollama service is active and responding.")
+                self._last_running_fetch = now
+                return self._cached_running
+            self._cached_running = (False, f"Ollama HTTP status {resp.status_code}.")
+            self._last_running_fetch = now
+            return self._cached_running
         except requests.RequestException:
-            return False, "Cannot connect to Ollama service on 127.0.0.1:11434."
+            self._cached_running = (False, "Cannot connect to Ollama service on 127.0.0.1:11434.")
+            self._last_running_fetch = now
+            return self._cached_running
+
+    def preload_model(self) -> None:
+        """Asynchronously warm up the model in RAM so user queries experience 0s loading delay."""
+        import threading
+        def _warm():
+            try:
+                requests.post(
+                    f"{self.base_url}/api/chat",
+                    json={"model": self.model, "messages": [], "keep_alive": -1},
+                    timeout=30,
+                )
+            except Exception:
+                pass
+        threading.Thread(target=_warm, daemon=True).start()
 
     def get_downloaded_models(self) -> List[str]:
         """Return list of models downloaded and available in local Ollama storage."""
         now = time.time()
-        if self._cached_models and (now - self._last_models_fetch < 10.0):
+        if self._cached_models and (now - self._last_models_fetch < 30.0):
             return self._cached_models
 
         try:
@@ -228,6 +262,8 @@ class OllamaProvider(AIProvider):
             "model": self.model,
             "messages": payload_messages,
             "stream": False,
+            "keep_alive": -1,
+            "think": False,
             "options": {
                 "temperature": temperature,
                 "num_ctx": self.context_size,
@@ -248,6 +284,8 @@ class OllamaProvider(AIProvider):
                 data = resp.json()
                 msg = data.get("message", {})
                 content = msg.get("content", "")
+                if not content and msg.get("thinking"):
+                    content = msg.get("thinking", "")
                 prompt_tokens = data.get("prompt_eval_count", 0)
                 completion_tokens = data.get("eval_count", 0)
 
@@ -318,6 +356,8 @@ class OllamaProvider(AIProvider):
             "model": self.model,
             "messages": payload_messages,
             "stream": True,
+            "keep_alive": -1,
+            "think": False,
             "options": {
                 "temperature": temperature,
                 "num_ctx": self.context_size,
@@ -335,7 +375,10 @@ class OllamaProvider(AIProvider):
                 for line in resp.iter_lines():
                     if line:
                         chunk_json = json.loads(line.decode("utf-8"))
-                        chunk_text = chunk_json.get("message", {}).get("content", "")
+                        msg_obj = chunk_json.get("message", {})
+                        chunk_text = msg_obj.get("content", "")
+                        if not chunk_text and msg_obj.get("thinking"):
+                            chunk_text = msg_obj.get("thinking", "")
                         if chunk_text:
                             yield chunk_text
         except Exception as e:

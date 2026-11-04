@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
 class HeaderBar(QFrame):
     settings_requested = Signal()
     clear_chat_requested = Signal()
+    provider_selected = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -43,12 +45,16 @@ class HeaderBar(QFrame):
 
         layout.addStretch()
 
-        # Model Badge Pill
-        self.model_badge = QLabel("● Provider: Ollama")
+        # Model Badge Pill (Clickable Dropdown Button)
+        self.model_badge = QPushButton("● LOCAL AI: gemma4:e2b ▾")
+        self.model_badge.setToolTip("Click to quickly switch AI Engine or configure any model API key")
+        self.model_badge.setCursor(Qt.PointingHandCursor)
         self.model_badge.setStyleSheet(
-            "background-color: #21262d; color: #58a6ff; border: 1px solid #30363d; "
-            "border-radius: 12px; padding: 4px 12px; font-size: 11px; font-weight: 600;"
+            "QPushButton { background-color: #21262d; color: #58a6ff; border: 1px solid #30363d; "
+            "border-radius: 12px; padding: 4px 14px; font-size: 11px; font-weight: 600; text-align: center; } "
+            "QPushButton:hover { background-color: #30363d; border-color: #58a6ff; }"
         )
+        self.model_badge.clicked.connect(self._show_model_menu)
         layout.addWidget(self.model_badge)
 
         # Action Buttons
@@ -62,21 +68,76 @@ class HeaderBar(QFrame):
         self.settings_btn.clicked.connect(self.settings_requested.emit)
         layout.addWidget(self.settings_btn)
 
+    def _show_model_menu(self):
+        """Open quick model switcher popup menu."""
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #161b22;
+                border: 1px solid #30363d;
+                border-radius: 6px;
+                padding: 6px;
+                color: #c9d1d9;
+            }
+            QMenu::item {
+                padding: 6px 20px;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+            QMenu::item:selected {
+                background-color: #1f6feb;
+                color: #ffffff;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #30363d;
+                margin: 4px 8px;
+            }
+        """)
+
+        act_local = menu.addAction("💻 Local AI Engine (Ollama - gemma4:e2b) [Offline]")
+        act_local.triggered.connect(lambda: self.provider_selected.emit("ollama"))
+
+        act_custom = menu.addAction("🌐 Any Model / Custom (Groq, DeepSeek, OpenRouter, Mistral, LM Studio)")
+        act_custom.triggered.connect(lambda: self.provider_selected.emit("custom"))
+
+        menu.addSeparator()
+
+        act_gemini = menu.addAction("✨ Google Gemini (API)")
+        act_gemini.triggered.connect(lambda: self.provider_selected.emit("gemini"))
+
+        act_openai = menu.addAction("⚡ OpenAI ChatGPT (API)")
+        act_openai.triggered.connect(lambda: self.provider_selected.emit("openai"))
+
+        act_mock = menu.addAction("🧪 Offline Mock Engine")
+        act_mock.triggered.connect(lambda: self.provider_selected.emit("mock"))
+
+        menu.addSeparator()
+
+        act_config = menu.addAction("⚙️ Configure API Keys & Models...")
+        act_config.triggered.connect(lambda: self.settings_requested.emit())
+
+        menu.exec(self.model_badge.mapToGlobal(self.model_badge.rect().bottomLeft()))
+
     def update_model_badge(self, provider_name: str, model_name: str):
         """Update the model status pill with current provider and model."""
         p_upper = provider_name.upper()
-        if provider_name == "ollama":
-            display_text = f"● LOCAL AI: {model_name}"
+        if provider_name.lower() in ("ollama", "local_ai", "local"):
+            display_text = f"● LOCAL AI: {model_name} ▾"
             color = "#58a6ff"
-        elif provider_name == "mock":
-            display_text = f"● OFFLINE MOCK: {model_name}"
+        elif provider_name.lower() in ("custom", "any model"):
+            display_text = f"● ANY MODEL: {model_name} ▾"
+            color = "#bc8cff"
+        elif provider_name.lower() == "mock":
+            display_text = f"● OFFLINE MOCK: {model_name} ▾"
             color = "#e3b341"
         else:
-            display_text = f"● {p_upper}: {model_name}"
+            display_text = f"● {p_upper}: {model_name} ▾"
             color = "#7ee787"
 
         self.model_badge.setText(display_text)
         self.model_badge.setStyleSheet(
-            f"background-color: #21262d; color: {color}; border: 1px solid #30363d; "
-            f"border-radius: 12px; padding: 4px 12px; font-size: 11px; font-weight: 600;"
+            f"QPushButton {{ background-color: #21262d; color: {color}; border: 1px solid #30363d; "
+            f"border-radius: 12px; padding: 4px 14px; font-size: 11px; font-weight: 600; text-align: center; }} "
+            f"QPushButton:hover {{ background-color: #30363d; border-color: {color}; }}"
         )

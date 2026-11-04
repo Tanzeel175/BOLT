@@ -200,6 +200,24 @@ class MessageCard(QFrame):
 
         layout.addWidget(self.content_browser)
 
+    def append_chunk(self, chunk: str):
+        """Append streamed token/chunk to the message and update markdown rendering."""
+        self.raw_content += chunk
+        self.content_browser.setHtml(format_markdown(self.raw_content))
+        doc = self.content_browser.document()
+        doc.adjustSize()
+        height = max(40, int(doc.size().height()) + 15)
+        self.content_browser.setMinimumHeight(height)
+
+    def set_content(self, text: str):
+        """Update entire message content."""
+        self.raw_content = text
+        self.content_browser.setHtml(format_markdown(text))
+        doc = self.content_browser.document()
+        doc.adjustSize()
+        height = max(40, int(doc.size().height()) + 15)
+        self.content_browser.setMinimumHeight(height)
+
     def _copy_to_clipboard(self):
         clipboard = QGuiApplication.clipboard()
         if clipboard:
@@ -302,7 +320,7 @@ class ChatView(QScrollArea):
             self.empty_state_widget.deleteLater()
             self.empty_state_widget = None
 
-    def add_message(self, role: str, content: str, timestamp: str = "", model: str = ""):
+    def add_message(self, role: str, content: str, timestamp: str = "", model: str = "") -> MessageCard:
         """Add a new message bubble to the chat."""
         self._hide_empty_state()
 
@@ -313,6 +331,11 @@ class ChatView(QScrollArea):
 
         # Auto-scroll to bottom
         QTimer.singleShot(50, self._scroll_to_bottom)
+        return card
+
+    def create_streaming_card(self, role: str = "assistant", initial_text: str = "", model: str = "") -> MessageCard:
+        """Create a message card ready for real-time streamed token chunks."""
+        return self.add_message(role=role, content=initial_text, model=model)
 
     def clear_chat(self):
         """Remove all messages and display empty state."""

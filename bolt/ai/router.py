@@ -23,14 +23,14 @@ class AIRouter:
         target = name_or_override or self.settings.provider
         provider = self.provider_mgr.get_provider(target)
 
-        # If no explicit override was requested (general conversation or task execution):
-        # Prefer the local model! If the active provider is an unconfigured cloud provider (missing API key),
+        # Core Principle: Prefer the local model!
+        # If the requested or active provider is not configured (e.g. missing API key),
         # automatically route to the local Ollama provider so tasks and chat continue working seamlessly.
-        if not name_or_override and provider.provider_name in ("openai", "gemini", "custom") and not provider.is_configured:
+        if not provider.is_configured:
             ollama = self.provider_mgr.get_provider("ollama")
             if ollama.is_configured:
                 logger.info(
-                    f"Active provider '{provider.display_name}' has no API key configured. "
+                    f"Target provider '{provider.display_name}' has no API key configured. "
                     f"Automatically routing to Local AI ({ollama.display_name})."
                 )
                 return ollama
@@ -97,8 +97,8 @@ class AIRouter:
 _ROUTER_INSTANCE: Optional[AIRouter] = None
 
 
-def get_ai_router() -> AIRouter:
+def get_ai_router(reload: bool = False) -> AIRouter:
     global _ROUTER_INSTANCE
-    if _ROUTER_INSTANCE is None:
+    if _ROUTER_INSTANCE is None or reload:
         _ROUTER_INSTANCE = AIRouter()
     return _ROUTER_INSTANCE

@@ -39,8 +39,9 @@ logger = get_logger("MainWindow")
 
 
 class AIWorker(QThread):
-    """Background worker thread for non-blocking AI queries."""
-    finished = Signal(object)  # Emits AIResponse
+    """Background worker thread for live real-time streaming AI queries."""
+    chunk_received = Signal(str)  # Emits each text chunk as it arrives
+    finished = Signal(object)     # Emits AIResponse
 
     def __init__(
         self,
@@ -54,13 +55,46 @@ class AIWorker(QThread):
         self.messages = messages
         self.system_prompt = system_prompt
         self.provider_override = provider_override
+        self._is_cancelled = False
+
+    def cancel(self):
+        self._is_cancelled = True
 
     def run(self):
         try:
-            response = self.router.generate(
+            provider = self.router.get_provider(self.provider_override)
+            sys_prompt = self.system_prompt or self.router.settings.system_prompt
+
+            full_chunks = []
+            for chunk in self.router.stream(
                 self.messages,
-                self.system_prompt,
+                system_prompt=sys_prompt,
                 provider_override=self.provider_override,
+            ):
+                if self._is_cancelled:
+                    break
+                full_chunks.append(chunk)
+                self.chunk_received.emit(chunk)
+
+            complete_text = "".join(full_chunks)
+            if not complete_text.strip():
+                # Fallback to generate if stream was empty
+                response = self.router.generate(
+                    self.messages,
+                    self.system_prompt,
+                    provider_override=self.provider_override,
+                )
+                self.finished.emit(response)
+                return
+
+            is_err = complete_text.startswith("⚠️") or complete_text.startswith("[Streaming error")
+            response = AIResponse(
+                content=complete_text,
+                model=provider.default_model,
+                provider=provider.provider_name,
+                tokens_used=len(complete_text.split()),
+                success=not is_err,
+                error=complete_text if is_err else None,
             )
             self.finished.emit(response)
         except Exception as e:
@@ -230,6 +264,7 @@ class MainWindow(QMainWindow):
         # Header actions
         self.header_bar.settings_requested.connect(self._open_settings)
         self.header_bar.clear_chat_requested.connect(self._clear_current_chat)
+        self.header_bar.provider_selected.connect(self._on_quick_provider_switch)
 
         # Sidebar actions
         self.sidebar.new_chat_requested.connect(self._start_new_chat)
@@ -417,6 +452,14 @@ class MainWindow(QMainWindow):
         self.input_bar.set_busy(True)
         self.status_bar.set_thinking(f"Thinking with {active_provider.display_name}...")
 
+        # Create active streaming message card immediately for instant feedback
+        self.current_streaming_card = self.chat_view.create_streaming_card(
+            role="assistant",
+            initial_text="⏳ *Thinking...*",
+            model=active_provider.default_model,
+        )
+        self._streaming_has_started = False
+
         # Build ChatMessage history for AI model
         chat_history = [
             ChatMessage(role=m["role"], content=m["content"])
@@ -430,8 +473,19 @@ class MainWindow(QMainWindow):
             system_prompt=self.settings.system_prompt,
             provider_override=provider_override,
         )
+        self.active_worker.chunk_received.connect(self._on_ai_chunk_received)
         self.active_worker.finished.connect(self._on_ai_response_received)
         self.active_worker.start()
+
+    def _on_ai_chunk_received(self, chunk: str):
+        """Append real-time token to visible message card."""
+        if hasattr(self, "current_streaming_card") and self.current_streaming_card:
+            if not getattr(self, "_streaming_has_started", False):
+                self.current_streaming_card.set_content(chunk)
+                self._streaming_has_started = True
+            else:
+                self.current_streaming_card.append_chunk(chunk)
+            self.chat_view._scroll_to_bottom()
 
     def _on_ai_response_received(self, response: AIResponse):
         """Handle AI completion returned by background worker."""
@@ -451,12 +505,17 @@ class MainWindow(QMainWindow):
                     tokens=response.tokens_used,
                 )
 
-            # Display assistant message card
-            self.chat_view.add_message(
-                role="assistant",
-                content=content,
-                model=model_used,
-            )
+            # Ensure streaming card contains final full content
+            if hasattr(self, "current_streaming_card") and self.current_streaming_card:
+                self.current_streaming_card.set_content(content)
+                self.current_streaming_card = None
+            else:
+                self.chat_view.add_message(
+                    role="assistant",
+                    content=content,
+                    model=model_used,
+                )
+
             self.status_bar.set_ready(f"Completed • Model: {model_used}")
             logger.info("AI response received and rendered successfully.")
 
@@ -485,11 +544,15 @@ class MainWindow(QMainWindow):
                     model=response.model or "System Alert",
                     tokens=0,
                 )
-            self.chat_view.add_message(
-                role="assistant",
-                content=error_card_content,
-                model=response.model or "System Alert",
-            )
+            if hasattr(self, "current_streaming_card") and self.current_streaming_card:
+                self.current_streaming_card.set_content(error_card_content)
+                self.current_streaming_card = None
+            else:
+                self.chat_view.add_message(
+                    role="assistant",
+                    content=error_card_content,
+                    model=response.model or "System Alert",
+                )
             logger.warning(f"AI response failed: {err_msg}")
 
     def _open_settings(self):
@@ -498,10 +561,36 @@ class MainWindow(QMainWindow):
         dialog.settings_saved.connect(self._on_settings_saved)
         dialog.exec()
 
+    def _on_quick_provider_switch(self, provider_id: str):
+        """Quickly switch AI Provider from header badge dropdown."""
+        from bolt.ai.provider_manager import get_provider_manager
+        pm = get_provider_manager()
+        provider = pm.get_provider(provider_id)
+
+        # If switching to a cloud/custom provider without an API key:
+        if not provider.is_configured and provider.provider_name in ("openai", "gemini", "custom"):
+            QMessageBox.information(
+                self,
+                "API Key Configuration Required",
+                f"To use {provider.display_name}, please configure your API key in Settings (⚙).\n\n"
+                f"BOLT is keeping Local AI (Ollama) active so all tasks continue running offline without interruption.",
+            )
+            self._open_settings()
+            return
+
+        ok, msg = pm.switch_default_provider(provider_id)
+        self.settings = get_settings(reload=True)
+        pm.refresh_settings(self.settings)
+        self.ai_router = get_ai_router(reload=True)
+        self._sync_header_badge()
+        self.status_bar.set_ready(f"Active Provider: {provider.display_name}")
+
     def _on_settings_saved(self):
         """Reload settings, update header badge, and refresh router."""
+        from bolt.ai.provider_manager import get_provider_manager
         self.settings = get_settings(reload=True)
-        self.ai_router = get_ai_router()
+        get_provider_manager(reload=True)
+        self.ai_router = get_ai_router(reload=True)
         self._sync_header_badge()
         self.status_bar.refresh_telemetry()
         self.status_bar.set_ready("Settings updated successfully")

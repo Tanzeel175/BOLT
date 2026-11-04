@@ -206,6 +206,10 @@ class SettingsDialog(QDialog):
         self.provider_combo = self.combo_provider
         form.addRow("Default AI Provider:", self.combo_provider)
 
+        prov_hint = QLabel("<small style='color: #8b949e;'>Choose <b>ollama</b> for offline local AI (recommended), or <b>custom</b> for Any Model API Key (Groq, DeepSeek, OpenRouter, Mistral, LM Studio).</small>")
+        prov_hint.setWordWrap(True)
+        form.addRow("", prov_hint)
+
         # Section 1: Local Ollama AI (Recommended & Offline)
         sep1 = QLabel("<b>💻 Local AI Engine (Ollama — Offline & Recommended)</b>")
         sep1.setStyleSheet("color: #58a6ff; margin-top: 6px;")
@@ -471,6 +475,8 @@ class SettingsDialog(QDialog):
         idx = self.combo_provider.findText(self.settings.provider)
         if idx >= 0:
             self.combo_provider.setCurrentIndex(idx)
+        else:
+            self.combo_provider.setCurrentIndex(0)
         self.input_ollama_model.setText(self.settings.ollama_model)
         self.input_ollama_url.setText(self.settings.ollama_base_url)
         self.input_custom_name.setText(self.settings.custom_provider_name)
@@ -495,7 +501,11 @@ class SettingsDialog(QDialog):
 
     def _on_save_clicked(self):
         """Save settings and apply."""
-        self.settings.provider = self.combo_provider.currentText()
+        selected_provider = self.combo_provider.currentData() or self.combo_provider.currentText()
+        if selected_provider not in AVAILABLE_PROVIDERS:
+            selected_provider = PROVIDER_OLLAMA
+        self.settings.provider = selected_provider
+
         self.settings.ollama_model = self.input_ollama_model.text().strip() or DEFAULT_OLLAMA_MODEL
         self.settings.ollama_base_url = self.input_ollama_url.text().strip() or "http://127.0.0.1:11434"
         self.settings.custom_provider_name = self.input_custom_name.text().strip() or DEFAULT_CUSTOM_NAME
@@ -504,6 +514,19 @@ class SettingsDialog(QDialog):
         self.settings.custom_model = self.input_custom_model.text().strip() or DEFAULT_CUSTOM_MODEL
         self.settings.gemini_api_key = self.input_gemini_key.text().strip()
         self.settings.openai_api_key = self.input_openai_key.text().strip()
+
+        # Offline-first safeguard: if user selected a provider without providing an API key,
+        # fallback to Ollama so BOLT never ends up in a broken or unresponsive state.
+        if self.settings.provider == PROVIDER_OPENAI and not self.settings.openai_api_key:
+            logger.info("OpenAI selected without API key. Retaining Local Ollama AI.")
+            self.settings.provider = PROVIDER_OLLAMA
+        elif self.settings.provider == PROVIDER_GEMINI and not self.settings.gemini_api_key:
+            logger.info("Gemini selected without API key. Retaining Local Ollama AI.")
+            self.settings.provider = PROVIDER_OLLAMA
+        elif self.settings.provider == PROVIDER_CUSTOM and not self.settings.custom_api_key and "localhost" not in self.settings.custom_base_url and "127.0.0.1" not in self.settings.custom_base_url:
+            logger.info("Custom provider selected without API key. Retaining Local Ollama AI.")
+            self.settings.provider = PROVIDER_OLLAMA
+
         self.settings.temperature = self.slider_temp.value() / 100.0
         self.settings.save()
 

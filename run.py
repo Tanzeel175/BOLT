@@ -74,6 +74,17 @@ def main():
     db = get_database()
     logger.info("Persistent storage verified and SQLite Database ready.")
 
+    # 2b. Pre-warm local Ollama model in background to eliminate cold-load delay
+    if settings.provider == "ollama":
+        try:
+            from bolt.ai.provider_manager import get_ai_provider_manager
+            pm = get_ai_provider_manager()
+            ollama_p = pm.get_provider("ollama")
+            if hasattr(ollama_p, "preload_model"):
+                ollama_p.preload_model()
+        except Exception:
+            pass
+
     # 3. Configure Windows High-DPI Scaling & Modern Qt Environment
     if hasattr(Qt, "AA_EnableHighDpiScaling"):
         QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
