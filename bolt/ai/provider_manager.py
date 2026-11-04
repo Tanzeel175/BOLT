@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from bolt.ai.base import AIProvider
+from bolt.ai.custom_provider import CustomAIProvider
 from bolt.ai.gemini_provider import GeminiProvider
 from bolt.ai.mock_provider import MockProvider
 from bolt.ai.ollama_provider import OllamaProvider
@@ -17,6 +18,7 @@ from bolt.config.constants import (
     DEFAULT_GEMINI_MODEL,
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_OPENAI_MODEL,
+    PROVIDER_CUSTOM,
     PROVIDER_GEMINI,
     PROVIDER_MOCK,
     PROVIDER_OLLAMA,
@@ -78,6 +80,12 @@ class AIProviderManager:
             model=self.settings.openai_model,
             base_url=self.settings.openai_base_url,
         )
+        self._providers[PROVIDER_CUSTOM] = CustomAIProvider(
+            name=self.settings.custom_provider_name,
+            api_key=self.settings.custom_api_key,
+            base_url=self.settings.custom_base_url,
+            model=self.settings.custom_model,
+        )
         self._providers[PROVIDER_MOCK] = MockProvider()
 
     def _sync_with_db(self) -> None:
@@ -94,6 +102,7 @@ class AIProviderManager:
                     self.settings.ollama_model if p_id == PROVIDER_OLLAMA
                     else self.settings.gemini_model if p_id == PROVIDER_GEMINI
                     else self.settings.openai_model if p_id == PROVIDER_OPENAI
+                    else self.settings.custom_model if p_id == PROVIDER_CUSTOM
                     else provider.default_model
                 )
 
@@ -127,6 +136,8 @@ class AIProviderManager:
             target_name = PROVIDER_OPENAI
         elif target_name in ("gemini", "google", "bard"):
             target_name = PROVIDER_GEMINI
+        elif target_name in ("custom", "any", "groq", "deepseek", "openrouter", "mistral", "together", "lmstudio", "claude"):
+            target_name = PROVIDER_CUSTOM
         elif target_name in ("mock", "local", "offline"):
             target_name = PROVIDER_MOCK
 
@@ -150,12 +161,14 @@ class AIProviderManager:
         key = (
             self.settings.gemini_api_key if p.provider_name == PROVIDER_GEMINI
             else self.settings.openai_api_key if p.provider_name == PROVIDER_OPENAI
+            else self.settings.custom_api_key if p.provider_name == PROVIDER_CUSTOM
             else ""
         )
         selected_model = (
             self.settings.ollama_model if p.provider_name == PROVIDER_OLLAMA
             else self.settings.gemini_model if p.provider_name == PROVIDER_GEMINI
             else self.settings.openai_model if p.provider_name == PROVIDER_OPENAI
+            else self.settings.custom_model if p.provider_name == PROVIDER_CUSTOM
             else p.default_model
         )
 
@@ -205,6 +218,8 @@ class AIProviderManager:
             norm = PROVIDER_OPENAI
         elif norm in ("gemini", "google"):
             norm = PROVIDER_GEMINI
+        elif norm in ("custom", "any", "groq", "deepseek", "openrouter", "mistral", "together", "lmstudio", "claude"):
+            norm = PROVIDER_CUSTOM
         elif norm in ("mock", "local", "offline"):
             norm = PROVIDER_MOCK
 
@@ -233,6 +248,8 @@ class AIProviderManager:
             norm = PROVIDER_OPENAI
         elif norm in ("gemini", "google"):
             norm = PROVIDER_GEMINI
+        elif norm in ("custom", "any", "groq", "deepseek", "openrouter"):
+            norm = PROVIDER_CUSTOM
 
         clean_model = model_name.strip()
         if not clean_model:
@@ -262,6 +279,15 @@ class AIProviderManager:
                 model=clean_model,
                 base_url=self.settings.openai_base_url,
             )
+        elif norm == PROVIDER_CUSTOM:
+            self.settings.custom_model = clean_model
+            self.settings.save()
+            self._providers[PROVIDER_CUSTOM] = CustomAIProvider(
+                name=self.settings.custom_provider_name,
+                api_key=self.settings.custom_api_key,
+                base_url=self.settings.custom_base_url,
+                model=clean_model,
+            )
 
         # Update in database
         try:
@@ -270,6 +296,26 @@ class AIProviderManager:
             pass
 
         return True, f"Model for {norm.title()} set to `{clean_model}`."
+
+    def configure_custom_provider(
+        self,
+        name: str,
+        base_url: str,
+        api_key: str,
+        model: str,
+    ) -> None:
+        """Update and reconfigure the custom / any model provider."""
+        self.settings.custom_provider_name = name.strip() or "Custom Provider"
+        self.settings.custom_base_url = base_url.strip()
+        self.settings.custom_api_key = api_key.strip()
+        self.settings.custom_model = model.strip()
+        self.settings.save()
+        self._providers[PROVIDER_CUSTOM] = CustomAIProvider(
+            name=self.settings.custom_provider_name,
+            api_key=self.settings.custom_api_key,
+            base_url=self.settings.custom_base_url,
+            model=self.settings.custom_model,
+        )
 
     def test_provider(self, provider_name: str) -> Tuple[bool, str, int]:
         """Test connectivity and measure response latency in milliseconds."""
@@ -282,6 +328,8 @@ class AIProviderManager:
             norm = PROVIDER_OPENAI
         elif norm in ("gemini", "google"):
             norm = PROVIDER_GEMINI
+        elif norm in ("custom", "any", "groq", "deepseek", "openrouter", "mistral", "together"):
+            norm = PROVIDER_CUSTOM
         elif norm in ("mock", "local", "offline"):
             norm = PROVIDER_MOCK
 

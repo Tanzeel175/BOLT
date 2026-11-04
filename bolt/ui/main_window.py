@@ -221,8 +221,10 @@ class MainWindow(QMainWindow):
             self.header_bar.update_model_badge("Gemini (No Key)", "Local Demo Mode")
         elif provider == "openai" and not self.settings.openai_api_key.strip():
             self.header_bar.update_model_badge("OpenAI (No Key)", "Local Demo Mode")
+        elif provider == "custom" and not self.settings.custom_api_key.strip() and "localhost" not in self.settings.custom_base_url and "127.0.0.1" not in self.settings.custom_base_url:
+            self.header_bar.update_model_badge("Custom (No Key)", "Local Demo Mode")
         else:
-            self.header_bar.update_model_badge(provider, model)
+            self.header_bar.update_model_badge(active_p.display_name, model)
 
     def _connect_signals(self):
         # Header actions

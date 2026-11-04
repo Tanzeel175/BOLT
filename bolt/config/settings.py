@@ -11,11 +11,15 @@ from .constants import (
     PROVIDER_OLLAMA,
     PROVIDER_GEMINI,
     PROVIDER_OPENAI,
+    PROVIDER_CUSTOM,
     PROVIDER_MOCK,
     AVAILABLE_PROVIDERS,
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_GEMINI_MODEL,
     DEFAULT_OPENAI_MODEL,
+    DEFAULT_CUSTOM_MODEL,
+    DEFAULT_CUSTOM_BASE_URL,
+    DEFAULT_CUSTOM_NAME,
     DEFAULT_TEMPERATURE,
     DEFAULT_MAX_TOKENS,
     DEFAULT_SYSTEM_PROMPT,
@@ -36,6 +40,10 @@ class Settings:
     openai_api_key: str = ""
     openai_model: str = DEFAULT_OPENAI_MODEL
     openai_base_url: str = "https://api.openai.com/v1"
+    custom_provider_name: str = DEFAULT_CUSTOM_NAME
+    custom_api_key: str = ""
+    custom_base_url: str = DEFAULT_CUSTOM_BASE_URL
+    custom_model: str = DEFAULT_CUSTOM_MODEL
     temperature: float = DEFAULT_TEMPERATURE
     max_tokens: int = DEFAULT_MAX_TOKENS
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
@@ -71,11 +79,19 @@ class Settings:
         openai_model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip()
         openai_base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").strip()
 
-        # Offline-first principle: If a cloud provider is selected but has no API key,
-        # automatically prefer the local model (Ollama) so BOLT operates 100% locally.
+        custom_provider_name = os.getenv("CUSTOM_PROVIDER_NAME", DEFAULT_CUSTOM_NAME).strip()
+        custom_api_key = os.getenv("CUSTOM_API_KEY", "").strip()
+        custom_base_url = os.getenv("CUSTOM_BASE_URL", DEFAULT_CUSTOM_BASE_URL).strip()
+        custom_model = os.getenv("CUSTOM_MODEL", DEFAULT_CUSTOM_MODEL).strip()
+
+        # Offline-first principle: If a cloud/custom provider is selected but has no API key
+        # (and is not a local endpoint), automatically prefer the local model (Ollama)
+        # so BOLT operates 100% locally without errors or cloud dependencies.
         if provider == PROVIDER_OPENAI and not openai_api_key:
             provider = PROVIDER_OLLAMA
         elif provider == PROVIDER_GEMINI and not gemini_api_key:
+            provider = PROVIDER_OLLAMA
+        elif provider == PROVIDER_CUSTOM and not custom_api_key and "localhost" not in custom_base_url and "127.0.0.1" not in custom_base_url:
             provider = PROVIDER_OLLAMA
 
         try:
@@ -102,6 +118,10 @@ class Settings:
             openai_api_key=openai_api_key,
             openai_model=openai_model,
             openai_base_url=openai_base_url,
+            custom_provider_name=custom_provider_name,
+            custom_api_key=custom_api_key,
+            custom_base_url=custom_base_url,
+            custom_model=custom_model,
             temperature=temperature,
             max_tokens=max_tokens,
             system_prompt=system_prompt,
@@ -121,6 +141,10 @@ class Settings:
             "OPENAI_API_KEY": self.openai_api_key,
             "OPENAI_MODEL": self.openai_model,
             "OPENAI_BASE_URL": self.openai_base_url,
+            "CUSTOM_PROVIDER_NAME": self.custom_provider_name,
+            "CUSTOM_API_KEY": self.custom_api_key,
+            "CUSTOM_BASE_URL": self.custom_base_url,
+            "CUSTOM_MODEL": self.custom_model,
             "BOLT_TEMPERATURE": str(self.temperature),
             "BOLT_MAX_TOKENS": str(self.max_tokens),
             "BOLT_LOG_LEVEL": self.log_level,
@@ -144,6 +168,10 @@ class Settings:
         os.environ["OPENAI_API_KEY"] = self.openai_api_key
         os.environ["OPENAI_MODEL"] = self.openai_model
         os.environ["OPENAI_BASE_URL"] = self.openai_base_url
+        os.environ["CUSTOM_PROVIDER_NAME"] = self.custom_provider_name
+        os.environ["CUSTOM_API_KEY"] = self.custom_api_key
+        os.environ["CUSTOM_BASE_URL"] = self.custom_base_url
+        os.environ["CUSTOM_MODEL"] = self.custom_model
         os.environ["BOLT_TEMPERATURE"] = str(self.temperature)
         os.environ["BOLT_MAX_TOKENS"] = str(self.max_tokens)
         os.environ["BOLT_LOG_LEVEL"] = self.log_level
@@ -155,6 +183,8 @@ class Settings:
             return self.gemini_api_key
         elif self.provider == PROVIDER_OPENAI:
             return self.openai_api_key
+        elif self.provider == PROVIDER_CUSTOM:
+            return self.custom_api_key
         return ""
 
     @property
@@ -166,6 +196,8 @@ class Settings:
             return self.gemini_model
         elif self.provider == PROVIDER_OPENAI:
             return self.openai_model
+        elif self.provider == PROVIDER_CUSTOM:
+            return self.custom_model or DEFAULT_CUSTOM_MODEL
         return "mock-offline-engine"
 
     def has_active_api_key(self) -> bool:

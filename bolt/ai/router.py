@@ -26,7 +26,7 @@ class AIRouter:
         # If no explicit override was requested (general conversation or task execution):
         # Prefer the local model! If the active provider is an unconfigured cloud provider (missing API key),
         # automatically route to the local Ollama provider so tasks and chat continue working seamlessly.
-        if not name_or_override and provider.provider_name in ("openai", "gemini") and not provider.is_configured:
+        if not name_or_override and provider.provider_name in ("openai", "gemini", "custom") and not provider.is_configured:
             ollama = self.provider_mgr.get_provider("ollama")
             if ollama.is_configured:
                 logger.info(

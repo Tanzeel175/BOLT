@@ -3,6 +3,7 @@
 from .base import AIProvider, AIResponse, ChatMessage
 from .gemini_provider import GeminiProvider
 from .openai_provider import OpenAIProvider
+from .custom_provider import CustomAIProvider
 from .mock_provider import MockProvider
 from .provider_manager import AIProviderManager, get_provider_manager, mask_key
 from .multi_ai import MultiAIComparator, get_multi_ai_comparator, ComparisonResult
@@ -15,6 +16,7 @@ __all__ = [
     "ChatMessage",
     "GeminiProvider",
     "OpenAIProvider",
+    "CustomAIProvider",
     "MockProvider",
     "AIProviderManager",
     "get_provider_manager",
