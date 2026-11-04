@@ -11,16 +11,19 @@ from bolt.ai.base import AIProvider
 from bolt.ai.custom_provider import CustomAIProvider
 from bolt.ai.gemini_provider import GeminiProvider
 from bolt.ai.mock_provider import MockProvider
+from bolt.ai.nebius_provider import NebiusProvider
 from bolt.ai.ollama_provider import OllamaProvider
 from bolt.ai.openai_provider import OpenAIProvider
 from bolt.config.constants import (
     AVAILABLE_PROVIDERS,
     DEFAULT_GEMINI_MODEL,
+    DEFAULT_NEBIUS_MODEL,
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_OPENAI_MODEL,
     PROVIDER_CUSTOM,
     PROVIDER_GEMINI,
     PROVIDER_MOCK,
+    PROVIDER_NEBIUS,
     PROVIDER_OLLAMA,
     PROVIDER_OPENAI,
 )
@@ -71,6 +74,11 @@ class AIProviderManager:
             context_size=self.settings.ollama_context_size,
             cpu_threads=self.settings.ollama_cpu_threads,
         )
+        self._providers[PROVIDER_NEBIUS] = NebiusProvider(
+            api_key=self.settings.nebius_api_key,
+            model=self.settings.nebius_model,
+            base_url=self.settings.nebius_base_url,
+        )
         self._providers[PROVIDER_GEMINI] = GeminiProvider(
             api_key=self.settings.gemini_api_key,
             model=self.settings.gemini_model,
@@ -100,6 +108,7 @@ class AIProviderManager:
                 is_default = (self.settings.provider == p_id)
                 model = (
                     self.settings.ollama_model if p_id == PROVIDER_OLLAMA
+                    else self.settings.nebius_model if p_id == PROVIDER_NEBIUS
                     else self.settings.gemini_model if p_id == PROVIDER_GEMINI
                     else self.settings.openai_model if p_id == PROVIDER_OPENAI
                     else self.settings.custom_model if p_id == PROVIDER_CUSTOM
@@ -132,6 +141,8 @@ class AIProviderManager:
         # Map common aliases
         if target_name in ("ollama", "gemma", "gemma4", "local_ai"):
             target_name = PROVIDER_OLLAMA
+        elif target_name in ("nebius", "tokenfactory", "token_factory"):
+            target_name = PROVIDER_NEBIUS
         elif target_name in ("chatgpt", "gpt", "openai"):
             target_name = PROVIDER_OPENAI
         elif target_name in ("gemini", "google", "bard"):
@@ -214,6 +225,8 @@ class AIProviderManager:
         norm = provider_name.strip().lower()
         if norm in ("ollama", "gemma", "gemma4"):
             norm = PROVIDER_OLLAMA
+        elif norm in ("nebius", "tokenfactory", "token_factory"):
+            norm = PROVIDER_NEBIUS
         elif norm in ("chatgpt", "gpt"):
             norm = PROVIDER_OPENAI
         elif norm in ("gemini", "google"):
@@ -237,7 +250,7 @@ class AIProviderManager:
             logger.warning(f"Error persisting default provider in DB: {e}")
 
         logger.info(f"Switched default AI provider to: {target_provider.display_name}")
-        if not target_provider.is_configured and norm in (PROVIDER_OPENAI, PROVIDER_GEMINI, PROVIDER_CUSTOM):
+        if not target_provider.is_configured and norm in (PROVIDER_NEBIUS, PROVIDER_OPENAI, PROVIDER_GEMINI, PROVIDER_CUSTOM):
             return True, (
                 f"Switched default AI provider to **{target_provider.display_name}**.\n\n"
                 f"⚠️ **Notice:** No API key is currently saved for {target_provider.display_name}. "
@@ -251,6 +264,8 @@ class AIProviderManager:
         norm = provider_name.strip().lower()
         if norm in ("ollama", "gemma"):
             norm = PROVIDER_OLLAMA
+        elif norm in ("nebius", "tokenfactory", "token_factory"):
+            norm = PROVIDER_NEBIUS
         elif norm in ("chatgpt", "gpt"):
             norm = PROVIDER_OPENAI
         elif norm in ("gemini", "google"):
@@ -270,6 +285,14 @@ class AIProviderManager:
                 model=clean_model,
                 context_size=self.settings.ollama_context_size,
                 cpu_threads=self.settings.ollama_cpu_threads,
+            )
+        elif norm == PROVIDER_NEBIUS:
+            self.settings.nebius_model = clean_model
+            self.settings.save()
+            self._providers[PROVIDER_NEBIUS] = NebiusProvider(
+                api_key=self.settings.nebius_api_key,
+                model=clean_model,
+                base_url=self.settings.nebius_base_url,
             )
         elif norm == PROVIDER_GEMINI:
             self.settings.gemini_model = clean_model
@@ -331,6 +354,8 @@ class AIProviderManager:
         norm = provider_name.strip().lower()
         if norm in ("ollama", "gemma"):
             norm = PROVIDER_OLLAMA
+        elif norm in ("nebius", "tokenfactory", "token_factory"):
+            norm = PROVIDER_NEBIUS
         elif norm in ("chatgpt", "gpt"):
             norm = PROVIDER_OPENAI
         elif norm in ("gemini", "google"):

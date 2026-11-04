@@ -35,14 +35,19 @@ from bolt.config.constants import (
     DEFAULT_CUSTOM_BASE_URL,
     DEFAULT_CUSTOM_MODEL,
     DEFAULT_CUSTOM_NAME,
+    DEFAULT_NEBIUS_BASE_URL,
+    DEFAULT_NEBIUS_MODEL,
     DEFAULT_OLLAMA_MODEL,
     PROVIDER_CUSTOM,
     PROVIDER_GEMINI,
     PROVIDER_MOCK,
+    PROVIDER_NEBIUS,
     PROVIDER_OLLAMA,
     PROVIDER_OPENAI,
+    SUPPORTED_NEBIUS_MODELS,
 )
 from bolt.ai.custom_provider import POPULAR_PRESETS, CustomAIProvider
+from bolt.ai.nebius_provider import NebiusProvider
 from bolt.config.settings import Settings, get_settings
 from bolt.core.data_manager import get_data_manager
 from bolt.ai.runtime_manager import get_runtime_manager
@@ -198,6 +203,7 @@ class SettingsDialog(QDialog):
         self.combo_provider = QComboBox()
         self.combo_provider.addItems([
             PROVIDER_OLLAMA,
+            PROVIDER_NEBIUS,
             PROVIDER_CUSTOM,
             PROVIDER_GEMINI,
             PROVIDER_OPENAI,
@@ -206,7 +212,7 @@ class SettingsDialog(QDialog):
         self.provider_combo = self.combo_provider
         form.addRow("Default AI Provider:", self.combo_provider)
 
-        prov_hint = QLabel("<small style='color: #8b949e;'>Choose <b>ollama</b> for offline local AI (recommended), or <b>custom</b> for Any Model API Key (Groq, DeepSeek, OpenRouter, Mistral, LM Studio).</small>")
+        prov_hint = QLabel("<small style='color: #8b949e;'>Choose <b>ollama</b> for offline local AI, <b>nebius</b> for Nebius Token Factory, or <b>custom</b> for Any Model API Key.</small>")
         prov_hint.setWordWrap(True)
         form.addRow("", prov_hint)
 
@@ -232,6 +238,44 @@ class SettingsDialog(QDialog):
         self.label_ollama_status = QLabel("")
         self.label_ollama_status.setStyleSheet("font-size: 10px; color: #8b949e;")
         form.addRow("", self.label_ollama_status)
+
+        # Section 2: Nebius Token Factory (Official OpenAI-Compatible Cloud API)
+        sep_nebius = QLabel("<b>🚀 Nebius Token Factory (Cloud Models & Fine-Tuning)</b>")
+        sep_nebius.setStyleSheet("color: #79c0ff; margin-top: 8px;")
+        form.addRow(sep_nebius)
+
+        nebius_hint = QLabel("<small style='color: #8b949e;'>Official endpoint: <code>https://api.tokenfactory.nebius.com/v1</code>. Generate your key at <a href='https://tokenfactory.nebius.com' style='color: #58a6ff;'>tokenfactory.nebius.com</a>.</small>")
+        nebius_hint.setOpenExternalLinks(True)
+        form.addRow("", nebius_hint)
+
+        nebius_key_box = QHBoxLayout()
+        self.input_nebius_key = QLineEdit()
+        self.input_nebius_key.setEchoMode(QLineEdit.Password)
+        self.input_nebius_key.setPlaceholderText("Enter Nebius Token Factory API key...")
+        self.btn_toggle_nebius = QPushButton("👁️")
+        self.btn_toggle_nebius.setFixedWidth(32)
+        self.btn_toggle_nebius.clicked.connect(lambda: self._toggle_echo(self.input_nebius_key))
+        nebius_key_box.addWidget(self.input_nebius_key, 1)
+        nebius_key_box.addWidget(self.btn_toggle_nebius)
+        form.addRow("Nebius API Key:", nebius_key_box)
+
+        nebius_model_box = QHBoxLayout()
+        self.input_nebius_model = QLineEdit()
+        self.input_nebius_model.setPlaceholderText(DEFAULT_NEBIUS_MODEL)
+        self.btn_test_nebius = QPushButton("Test Nebius")
+        self.btn_test_nebius.setStyleSheet("padding: 4px 10px; font-weight: 600;")
+        self.btn_test_nebius.clicked.connect(self._on_test_nebius_clicked)
+        nebius_model_box.addWidget(self.input_nebius_model, 1)
+        nebius_model_box.addWidget(self.btn_test_nebius)
+        form.addRow("Nebius Model:", nebius_model_box)
+
+        self.input_nebius_url = QLineEdit()
+        self.input_nebius_url.setPlaceholderText(DEFAULT_NEBIUS_BASE_URL)
+        form.addRow("Nebius Base URL:", self.input_nebius_url)
+
+        self.label_nebius_status = QLabel("")
+        self.label_nebius_status.setStyleSheet("font-size: 10px; color: #8b949e;")
+        form.addRow("", self.label_nebius_status)
 
         # Section 2: Any Model / Custom API Key
         sep2 = QLabel("<b>🌐 Any Model / Custom API Key (Groq, DeepSeek, OpenRouter, Mistral, LM Studio, etc.)</b>")
@@ -455,6 +499,20 @@ class SettingsDialog(QDialog):
             self.label_ollama_status.setStyleSheet("font-size: 10px; color: #f85149;")
             self.label_ollama_status.setText(f"⚠️ {msg}")
 
+    def _on_test_nebius_clicked(self):
+        provider = NebiusProvider(
+            api_key=self.input_nebius_key.text().strip(),
+            model=self.input_nebius_model.text().strip() or DEFAULT_NEBIUS_MODEL,
+            base_url=self.input_nebius_url.text().strip() or DEFAULT_NEBIUS_BASE_URL,
+        )
+        ok, msg = provider.test_connection()
+        if ok:
+            self.label_nebius_status.setStyleSheet("font-size: 10px; color: #3fb950;")
+            self.label_nebius_status.setText(f"✅ {msg}")
+        else:
+            self.label_nebius_status.setStyleSheet("font-size: 10px; color: #f85149;")
+            self.label_nebius_status.setText(f"⚠️ {msg}")
+
     def _on_test_custom_clicked(self):
         provider = CustomAIProvider(
             name=self.input_custom_name.text().strip() or "Custom Provider",
@@ -479,6 +537,9 @@ class SettingsDialog(QDialog):
             self.combo_provider.setCurrentIndex(0)
         self.input_ollama_model.setText(self.settings.ollama_model)
         self.input_ollama_url.setText(self.settings.ollama_base_url)
+        self.input_nebius_key.setText(self.settings.nebius_api_key)
+        self.input_nebius_model.setText(self.settings.nebius_model)
+        self.input_nebius_url.setText(self.settings.nebius_base_url)
         self.input_custom_name.setText(self.settings.custom_provider_name)
         self.input_custom_url.setText(self.settings.custom_base_url)
         self.input_custom_key.setText(self.settings.custom_api_key)
@@ -508,6 +569,9 @@ class SettingsDialog(QDialog):
 
         self.settings.ollama_model = self.input_ollama_model.text().strip() or DEFAULT_OLLAMA_MODEL
         self.settings.ollama_base_url = self.input_ollama_url.text().strip() or "http://127.0.0.1:11434"
+        self.settings.nebius_api_key = self.input_nebius_key.text().strip()
+        self.settings.nebius_model = self.input_nebius_model.text().strip() or DEFAULT_NEBIUS_MODEL
+        self.settings.nebius_base_url = self.input_nebius_url.text().strip() or DEFAULT_NEBIUS_BASE_URL
         self.settings.custom_provider_name = self.input_custom_name.text().strip() or DEFAULT_CUSTOM_NAME
         self.settings.custom_base_url = self.input_custom_url.text().strip()
         self.settings.custom_api_key = self.input_custom_key.text().strip()
@@ -517,7 +581,10 @@ class SettingsDialog(QDialog):
 
         # Offline-first safeguard: if user selected a provider without providing an API key,
         # fallback to Ollama so BOLT never ends up in a broken or unresponsive state.
-        if self.settings.provider == PROVIDER_OPENAI and not self.settings.openai_api_key:
+        if self.settings.provider == PROVIDER_NEBIUS and not self.settings.nebius_api_key:
+            logger.info("Nebius selected without API key. Retaining Local Ollama AI.")
+            self.settings.provider = PROVIDER_OLLAMA
+        elif self.settings.provider == PROVIDER_OPENAI and not self.settings.openai_api_key:
             logger.info("OpenAI selected without API key. Retaining Local Ollama AI.")
             self.settings.provider = PROVIDER_OLLAMA
         elif self.settings.provider == PROVIDER_GEMINI and not self.settings.gemini_api_key:

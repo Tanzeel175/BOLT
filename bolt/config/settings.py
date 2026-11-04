@@ -9,12 +9,15 @@ from dotenv import load_dotenv
 from .constants import (
     ROOT_DIR,
     PROVIDER_OLLAMA,
+    PROVIDER_NEBIUS,
     PROVIDER_GEMINI,
     PROVIDER_OPENAI,
     PROVIDER_CUSTOM,
     PROVIDER_MOCK,
     AVAILABLE_PROVIDERS,
     DEFAULT_OLLAMA_MODEL,
+    DEFAULT_NEBIUS_MODEL,
+    DEFAULT_NEBIUS_BASE_URL,
     DEFAULT_GEMINI_MODEL,
     DEFAULT_OPENAI_MODEL,
     DEFAULT_CUSTOM_MODEL,
@@ -35,6 +38,9 @@ class Settings:
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_context_size: int = 2048
     ollama_cpu_threads: int = 8
+    nebius_api_key: str = ""
+    nebius_model: str = DEFAULT_NEBIUS_MODEL
+    nebius_base_url: str = DEFAULT_NEBIUS_BASE_URL
     gemini_api_key: str = ""
     gemini_model: str = DEFAULT_GEMINI_MODEL
     openai_api_key: str = ""
@@ -72,6 +78,10 @@ class Settings:
         except ValueError:
             ollama_cpu_threads = 8
 
+        nebius_api_key = os.getenv("NEBIUS_API_KEY", "").strip()
+        nebius_model = os.getenv("NEBIUS_MODEL", DEFAULT_NEBIUS_MODEL).strip()
+        nebius_base_url = os.getenv("NEBIUS_BASE_URL", DEFAULT_NEBIUS_BASE_URL).strip()
+
         gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
         gemini_model = os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip()
 
@@ -87,7 +97,9 @@ class Settings:
         # Offline-first principle: If a cloud/custom provider is selected but has no API key
         # (and is not a local endpoint), automatically prefer the local model (Ollama)
         # so BOLT operates 100% locally without errors or cloud dependencies.
-        if provider == PROVIDER_OPENAI and not openai_api_key:
+        if provider == PROVIDER_NEBIUS and not nebius_api_key:
+            provider = PROVIDER_OLLAMA
+        elif provider == PROVIDER_OPENAI and not openai_api_key:
             provider = PROVIDER_OLLAMA
         elif provider == PROVIDER_GEMINI and not gemini_api_key:
             provider = PROVIDER_OLLAMA
@@ -113,6 +125,9 @@ class Settings:
             ollama_base_url=ollama_base_url,
             ollama_context_size=ollama_context_size,
             ollama_cpu_threads=ollama_cpu_threads,
+            nebius_api_key=nebius_api_key,
+            nebius_model=nebius_model,
+            nebius_base_url=nebius_base_url,
             gemini_api_key=gemini_api_key,
             gemini_model=gemini_model,
             openai_api_key=openai_api_key,
@@ -136,6 +151,9 @@ class Settings:
             "OLLAMA_BASE_URL": self.ollama_base_url,
             "OLLAMA_CONTEXT_SIZE": str(self.ollama_context_size),
             "OLLAMA_CPU_THREADS": str(self.ollama_cpu_threads),
+            "NEBIUS_API_KEY": self.nebius_api_key,
+            "NEBIUS_MODEL": self.nebius_model,
+            "NEBIUS_BASE_URL": self.nebius_base_url,
             "GEMINI_API_KEY": self.gemini_api_key,
             "GEMINI_MODEL": self.gemini_model,
             "OPENAI_API_KEY": self.openai_api_key,
@@ -163,6 +181,9 @@ class Settings:
         os.environ["OLLAMA_BASE_URL"] = self.ollama_base_url
         os.environ["OLLAMA_CONTEXT_SIZE"] = str(self.ollama_context_size)
         os.environ["OLLAMA_CPU_THREADS"] = str(self.ollama_cpu_threads)
+        os.environ["NEBIUS_API_KEY"] = self.nebius_api_key
+        os.environ["NEBIUS_MODEL"] = self.nebius_model
+        os.environ["NEBIUS_BASE_URL"] = self.nebius_base_url
         os.environ["GEMINI_API_KEY"] = self.gemini_api_key
         os.environ["GEMINI_MODEL"] = self.gemini_model
         os.environ["OPENAI_API_KEY"] = self.openai_api_key
@@ -179,7 +200,9 @@ class Settings:
     @property
     def current_api_key(self) -> str:
         """Return the API key for the currently active provider."""
-        if self.provider == PROVIDER_GEMINI:
+        if self.provider == PROVIDER_NEBIUS:
+            return self.nebius_api_key
+        elif self.provider == PROVIDER_GEMINI:
             return self.gemini_api_key
         elif self.provider == PROVIDER_OPENAI:
             return self.openai_api_key
@@ -192,13 +215,15 @@ class Settings:
         """Return the model name for the currently active provider."""
         if self.provider == PROVIDER_OLLAMA:
             return self.ollama_model
+        elif self.provider == PROVIDER_NEBIUS:
+            return self.nebius_model
         elif self.provider == PROVIDER_GEMINI:
             return self.gemini_model
         elif self.provider == PROVIDER_OPENAI:
             return self.openai_model
         elif self.provider == PROVIDER_CUSTOM:
-            return self.custom_model or DEFAULT_CUSTOM_MODEL
-        return "mock-offline-engine"
+            return self.custom_model
+        return ""
 
     def has_active_api_key(self) -> bool:
         """Check if active provider is ready (local models do not require API keys)."""

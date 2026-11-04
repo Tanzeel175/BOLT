@@ -82,6 +82,7 @@ MIN_WINDOW_HEIGHT = 550
 
 # Provider Constants
 PROVIDER_OLLAMA = "ollama"
+PROVIDER_NEBIUS = "nebius"
 PROVIDER_GEMINI = "gemini"
 PROVIDER_OPENAI = "openai"
 PROVIDER_CUSTOM = "custom"
@@ -89,6 +90,7 @@ PROVIDER_MOCK = "mock"
 
 AVAILABLE_PROVIDERS = [
     PROVIDER_OLLAMA,
+    PROVIDER_NEBIUS,
     PROVIDER_CUSTOM,
     PROVIDER_GEMINI,
     PROVIDER_OPENAI,
@@ -96,6 +98,8 @@ AVAILABLE_PROVIDERS = [
 ]
 
 DEFAULT_OLLAMA_MODEL = "gemma4:e2b"
+DEFAULT_NEBIUS_MODEL = "meta-llama/Meta-Llama-3.1-70B-Instruct"
+DEFAULT_NEBIUS_BASE_URL = "https://api.tokenfactory.nebius.com/v1"
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 DEFAULT_CUSTOM_MODEL = "llama-3.3-70b-versatile"
@@ -103,6 +107,18 @@ DEFAULT_CUSTOM_BASE_URL = "https://api.groq.com/openai/v1"
 DEFAULT_CUSTOM_NAME = "Custom / Any Model"
 DEFAULT_TEMPERATURE = 0.7
 DEFAULT_MAX_TOKENS = 2048
+
+# Official Nebius Token Factory Models (OpenAI-compatible endpoints)
+SUPPORTED_NEBIUS_MODELS = [
+    "meta-llama/Meta-Llama-3.1-70B-Instruct",
+    "meta-llama/Meta-Llama-3.1-8B-Instruct",
+    "meta-llama/Meta-Llama-3.1-405B-Instruct",
+    "Qwen/Qwen2.5-72B-Instruct",
+    "Qwen/Qwen2.5-Coder-32B-Instruct",
+    "deepseek-ai/DeepSeek-V3",
+    "deepseek-ai/DeepSeek-R1",
+    "mistralai/Mistral-Nemo-Instruct-2407",
+]
 
 # Default System Prompt (Optimized for fast CPU inference & conciseness)
 DEFAULT_SYSTEM_PROMPT = (

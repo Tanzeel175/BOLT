@@ -98,6 +98,9 @@ class HeaderBar(QFrame):
         act_local = menu.addAction("💻 Local AI Engine (Ollama - gemma4:e2b) [Offline]")
         act_local.triggered.connect(lambda: self.provider_selected.emit("ollama"))
 
+        act_nebius = menu.addAction("🚀 Nebius Token Factory (Cloud Models)")
+        act_nebius.triggered.connect(lambda: self.provider_selected.emit("nebius"))
+
         act_custom = menu.addAction("🌐 Any Model / Custom (Groq, DeepSeek, OpenRouter, Mistral, LM Studio)")
         act_custom.triggered.connect(lambda: self.provider_selected.emit("custom"))
 
@@ -125,6 +128,9 @@ class HeaderBar(QFrame):
         if provider_name.lower() in ("ollama", "local_ai", "local"):
             display_text = f"● LOCAL AI: {model_name} ▾"
             color = "#58a6ff"
+        elif provider_name.lower() in ("nebius", "tokenfactory", "token_factory"):
+            display_text = f"● NEBIUS: {model_name} ▾"
+            color = "#79c0ff"
         elif provider_name.lower() in ("custom", "any model"):
             display_text = f"● ANY MODEL: {model_name} ▾"
             color = "#bc8cff"

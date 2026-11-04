@@ -251,7 +251,9 @@ class MainWindow(QMainWindow):
         active_p = self.ai_router.get_provider()
         provider = active_p.provider_name
         model = active_p.default_model
-        if provider == "gemini" and not self.settings.gemini_api_key.strip():
+        if provider == "nebius" and not self.settings.nebius_api_key.strip():
+            self.header_bar.update_model_badge("Nebius (No Key)", "Local Demo Mode")
+        elif provider == "gemini" and not self.settings.gemini_api_key.strip():
             self.header_bar.update_model_badge("Gemini (No Key)", "Local Demo Mode")
         elif provider == "openai" and not self.settings.openai_api_key.strip():
             self.header_bar.update_model_badge("OpenAI (No Key)", "Local Demo Mode")
@@ -568,7 +570,7 @@ class MainWindow(QMainWindow):
         provider = pm.get_provider(provider_id)
 
         # If switching to a cloud/custom provider without an API key:
-        if not provider.is_configured and provider.provider_name in ("openai", "gemini", "custom"):
+        if not provider.is_configured and provider.provider_name in ("nebius", "openai", "gemini", "custom"):
             QMessageBox.information(
                 self,
                 "API Key Configuration Required",
