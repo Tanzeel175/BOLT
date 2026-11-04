@@ -4,6 +4,7 @@ Maintains persistent SQLite storage of discovered and verified applications,
 with alias mapping and auto-synchronization.
 """
 
+import re
 from typing import Any, Dict, List, Optional
 from bolt.core.database import Database, get_database
 from bolt.core.logger import get_logger
@@ -17,6 +18,11 @@ COMMON_ALIASES: Dict[str, str] = {
     "vs code": "visual studio code",
     "code": "visual studio code",
     "chrome": "google chrome",
+    "the chrome": "google chrome",
+    "browser": "google chrome",
+    "the browser": "google chrome",
+    "web browser": "google chrome",
+    "my browser": "google chrome",
     "google-chrome": "google chrome",
     "brave": "brave",
     "brave browser": "brave",
@@ -80,9 +86,10 @@ class ApplicationRegistry:
         If not found in registry and allow_live_discovery is True, performs on-demand discovery.
         """
         clean_query = query.strip().lower()
+        clean_stripped = re.sub(r"^(?:the|a|my)\s+", "", clean_query).strip()
 
         # 1. Check alias table
-        target_name = COMMON_ALIASES.get(clean_query, clean_query)
+        target_name = COMMON_ALIASES.get(clean_query, COMMON_ALIASES.get(clean_stripped, clean_stripped))
 
         # 2. Try exact name match in SQLite
         app = self.db.get_application_by_name(target_name)

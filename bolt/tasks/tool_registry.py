@@ -13,6 +13,8 @@ from typing import Any, Callable, Dict, List, Optional
 from bolt.browser.browser_detector import get_browser_detector
 from bolt.browser.browser_controller import get_browser_controller
 from bolt.browser.website_registry import get_website_registry
+from bolt.browser.chrome_profile_manager import get_chrome_profile_manager
+from bolt.browser.real_browser_controller import get_real_browser_controller
 from bolt.core.logger import get_logger
 from bolt.windows.app_controller import get_app_controller
 from bolt.windows.window_manager import get_window_manager
@@ -121,6 +123,8 @@ class ToolRegistry:
         browser_ctrl = get_browser_controller()
         site_reg = get_website_registry()
         browser_det = get_browser_detector()
+        real_browser = get_real_browser_controller()
+        chrome_profiles = get_chrome_profile_manager()
         app_ctrl = get_app_controller()
         win_mgr = get_window_manager()
         ai_router = get_ai_router()
@@ -229,6 +233,185 @@ class ToolRegistry:
             description="Fetch all registered websites and URLs in BOLT's persistent memory.",
             parameters={"type": "object", "properties": {}},
             handler=lambda: site_reg.list_websites(),
+        )
+
+        self.register_tool(
+            name="list_browser_profiles",
+            description="List all configured Google Chrome profiles discovered on this computer with their display names, Google account names, and emails.",
+            parameters={"type": "object", "properties": {}},
+            handler=lambda: [p.__dict__ for p in chrome_profiles.list_profiles()],
+        )
+
+        self.register_tool(
+            name="select_browser_profile",
+            description="Select, switch to, or launch a Google Chrome profile by name, email, or directory (e.g. 'm tanzeel', 'Work', 'tanzeelshahzad75@gmail.com').",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "profile_name": {
+                        "type": "string",
+                        "description": "Profile display name, email, or directory name.",
+                    },
+                    "open_url": {
+                        "type": "string",
+                        "description": "Optional URL to open immediately upon profile selection.",
+                    },
+                },
+                "required": ["profile_name"],
+            },
+            handler=lambda profile_name, open_url="", new_window=False: chrome_profiles.select_profile(profile_name, open_url=open_url or None, force_new_window=new_window),
+        )
+
+        self.register_tool(
+            name="navigate_browser_url",
+            description="Navigate the active or specified Google Chrome window to a web URL (e.g. 'https://mail.google.com/').",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "URL or web address to navigate to.",
+                    },
+                    "profile_name": {
+                        "type": "string",
+                        "description": "Optional Chrome profile to use for navigation.",
+                    },
+                },
+                "required": ["url"],
+            },
+            handler=lambda url, profile_name="", new_tab=True: real_browser.navigate_url(url, profile_query=profile_name or None, new_tab=new_tab),
+        )
+
+        self.register_tool(
+            name="get_browser_tabs",
+            description="List all open browser tabs in the target or active Google Chrome window.",
+            parameters={"type": "object", "properties": {}},
+            handler=lambda: real_browser.get_chrome_tabs(),
+        )
+
+        self.register_tool(
+            name="inspect_browser_page",
+            description="Inspect interactive elements (buttons, links, inputs, checkboxes) in the active web page and assign sequential IDs [1], [2], [3]... with stale protection.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "max_elements": {
+                        "type": "integer",
+                        "description": "Maximum number of elements to index (default 40).",
+                    },
+                },
+            },
+            handler=lambda max_elements=40: real_browser.inspect_webpage(max_elements=max_elements),
+        )
+
+        self.register_tool(
+            name="click_browser_element",
+            description="Click a button, link, or tab on the active web page by temporary ID [1], [2] or semantic element name (e.g. 'Compose', 'Search', 'Next').",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "element_id": {
+                        "type": "integer",
+                        "description": "Temporary element ID assigned by inspect_browser_page.",
+                    },
+                    "element_name": {
+                        "type": "string",
+                        "description": "Semantic text or label of the button or link.",
+                    },
+                },
+            },
+            handler=lambda element_id=None, element_name="": real_browser.click_element(element_id=element_id, element_name=element_name or None),
+        )
+
+        self.register_tool(
+            name="type_browser_element",
+            description="Enter text into an input field or text area on the active web page by temporary ID [1], [2] or element name.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to enter into the field.",
+                    },
+                    "element_id": {
+                        "type": "integer",
+                        "description": "Temporary element ID assigned by inspect_browser_page.",
+                    },
+                    "element_name": {
+                        "type": "string",
+                        "description": "Semantic name or placeholder of the input field.",
+                    },
+                    "clear_first": {
+                        "type": "boolean",
+                        "description": "Whether to clear existing text before typing.",
+                    },
+                },
+                "required": ["text"],
+            },
+            handler=lambda text, element_id=None, element_name="", clear_first=False: real_browser.type_element(text, element_id=element_id, element_name=element_name or None, clear_first=clear_first),
+        )
+
+        self.register_tool(
+            name="scroll_browser_page",
+            description="Scroll the active web page up or down.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "direction": {
+                        "type": "string",
+                        "description": "Scroll direction: 'down' or 'up'.",
+                    },
+                    "amount": {
+                        "type": "integer",
+                        "description": "Scroll intensity/distance units (default 3).",
+                    },
+                },
+            },
+            handler=lambda direction="down", amount=3: real_browser.scroll_page(direction=direction, amount=amount),
+        )
+
+        self.register_tool(
+            name="wait_for_browser_element",
+            description="Wait until a target element or text appears on the web page.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "element_name": {
+                        "type": "string",
+                        "description": "Element text, button label, or title to wait for.",
+                    },
+                    "timeout_seconds": {
+                        "type": "number",
+                        "description": "Maximum seconds to wait (default 10.0).",
+                    },
+                },
+                "required": ["element_name"],
+            },
+            handler=lambda element_name, timeout_seconds=10.0: real_browser.wait_for_element(element_name, timeout_seconds=timeout_seconds),
+        )
+
+        self.register_tool(
+            name="draft_browser_email",
+            description="Prepare a complete email draft in Gmail with recipient, subject, and body. Verifies the draft content and halts for human approval without sending.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "recipient": {
+                        "type": "string",
+                        "description": "Recipient email address.",
+                    },
+                    "subject": {
+                        "type": "string",
+                        "description": "Email subject line.",
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Email message body.",
+                    },
+                },
+                "required": ["recipient", "subject", "body"],
+            },
+            handler=lambda recipient, subject, body: real_browser.draft_gmail_email(recipient, subject, body),
         )
 
         # =====================================================================

@@ -117,6 +117,15 @@ class AppController:
                     "app_name": display_name,
                     "message": f"{display_name} is already open. Switched to active window.",
                 }
+            elif app_name.lower() not in ["chrome", "google chrome", "msedge", "edge", "brave"]:
+                logger.info(f"Application '{display_name}' is already running (PIDs: {pids}).")
+                return {
+                    "success": True,
+                    "already_running": True,
+                    "action": "switched_to_window",
+                    "app_name": display_name,
+                    "message": f"{display_name} is already open and running.",
+                }
             else:
                 logger.info(f"Application '{display_name}' running in background with no visible window; launching visible instance...")
 

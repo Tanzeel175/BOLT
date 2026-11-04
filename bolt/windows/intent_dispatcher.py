@@ -47,6 +47,11 @@ class WindowsIntentDispatcher:
 
     def _is_multi_action_instruction(self, lower: str) -> bool:
         """Identify whether an instruction contains multiple sequential/compound steps."""
+        # Exclusions for Phase 4 single provider query without multi-step chaining
+        if re.match(r"^ask\s+(gemini|chatgpt|openai|mock)\s+", lower):
+            if not any(conj in lower for conj in ["and show", "and send", "and then", "and save", "and explain", ", and"]):
+                return False
+
         # 1. Workflow Memory recall query
         if any(k in lower for k in ["same process", "last time", "repeat workflow"]):
             return True
@@ -56,13 +61,8 @@ class WindowsIntentDispatcher:
             return True
 
         # 3. Workflow B (Email draft & approval)
-        if "email" in lower and any(v in lower for v in ["write", "draft", "prepare", "compose"]) and any(w in lower for w in ["and", "show", "send", "review"]):
+        if any(w in lower for w in ["email", "mail", "gmail"]) and any(v in lower for v in ["write", "draft", "prepare", "compose", "mail to", "email to", "send"]):
             return True
-
-        # Exclusions for Phase 4 single provider query without multi-step chaining
-        if re.match(r"^ask\s+(gemini|chatgpt|openai|mock)\s+", lower):
-            if not any(conj in lower for conj in ["and show", "and send", "and then", "and save", "and explain", ", and"]):
-                return False
 
         # 4. Workflow C (Python project / run / errors / fix)
         if any(term in lower for term in ["python project", "run it", "identify errors", "fix errors", "explain how to fix"]):
@@ -87,7 +87,7 @@ class WindowsIntentDispatcher:
             return False
 
         # 6. Compound actions: multiple verbs + conjunctions
-        action_verbs = ["open", "search", "summarize", "save", "find", "ask", "run", "explain", "launch", "write", "type", "create", "compare"]
+        action_verbs = ["open", "search", "summarize", "save", "find", "ask", "run", "explain", "launch", "write", "type", "create", "compare", "mail", "go", "navigate", "select", "compose"]
         padded = f" {lower} "
         verb_count = sum(1 for v in action_verbs if f" {v} " in padded)
         has_conjunction = any(c in lower for c in [" and ", ", and ", " and then ", ", then ", " and summarize ", " and save ", " and write ", " and create "]) or ("," in lower and " and " in lower)
@@ -1036,6 +1036,43 @@ class WindowsIntentDispatcher:
                 content=content,
             )
 
+        # ---------------- Chrome Profile Discovery & Selection ----------------
+        profile_match = re.match(
+            r"^(?:select|switch\s+to|open|activate|use)\s+(?:chrome\s+)?profile\s+(?:called\s+|named\s+)?([^\n]+)$",
+            lower_stripped,
+        )
+        if profile_match:
+            prof_name = profile_match.group(1).strip()
+            from bolt.browser.chrome_profile_manager import get_chrome_profile_manager
+            res = get_chrome_profile_manager().select_profile(prof_name)
+            return IntentResult(
+                is_windows_action=True,
+                action_type="select_profile",
+                success=res.get("success", False),
+                title=f"Chrome Profile: {res.get('profile_name', prof_name)}",
+                content=res.get("message") or res.get("details") or res.get("error", "Profile selected."),
+                raw_data=res,
+            )
+
+        if any(k in lower_stripped for k in ["list profiles", "show profiles", "available profiles", "chrome profiles", "what profiles"]):
+            from bolt.browser.chrome_profile_manager import get_chrome_profile_manager
+            profiles = get_chrome_profile_manager().list_profiles()
+            if not profiles:
+                content = "No Google Chrome profiles discovered on this system."
+            else:
+                rows = [
+                    f"- **{p.name}** (`{p.directory}`)" + (f" — *{p.gaia_name}* ({p.email})" if p.email else "") + (" *(active window)*" if p.is_active_window else "")
+                    for p in profiles
+                ]
+                content = f"### 👤 Discovered Google Chrome Profiles ({len(profiles)})\n\n" + "\n".join(rows)
+            return IntentResult(
+                is_windows_action=True,
+                action_type="list_profiles",
+                success=True,
+                title="Chrome Profiles",
+                content=content,
+            )
+
         # ---------------- 8. Open Website or Application ----------------
         open_match = re.match(
             r"^(open|visit|go\s+to|navigate\s+to|launch|start|run)\s+(?:website\s+|this\s+url\s*:\s*|url\s+|application\s+|app\s+)?([^\n]+)$",
@@ -1045,6 +1082,9 @@ class WindowsIntentDispatcher:
             raw_target = open_match.group(2).strip()
             # Clean off trailing browser context phrases like "in my browser" or "in browser"
             target = re.sub(r"\s+in\s+(?:my\s+)?browser$", "", raw_target).strip()
+            clean_target = re.sub(r"^(?:the|a|my)\s+", "", target).strip()
+            if clean_target in ("browser", "web browser", "internet", "chrome"):
+                target = "google chrome"
 
             # A. Check if target is a Known Website or Valid Web URL
             is_explicit_url = target.startswith("http://") or target.startswith("https://")

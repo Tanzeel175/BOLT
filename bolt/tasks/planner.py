@@ -38,7 +38,7 @@ class TaskPlanner:
             return self._build_workflow_a_research(clean)
 
         # 2. Specialized Workflow B: Email Preparation with Approval Gate
-        if "email" in lower and any(v in lower for v in ["write", "draft", "prepare", "compose", "ask gemini", "ask chatgpt"]):
+        if any(w in lower for w in ["email", "mail", "gmail"]) and any(v in lower for v in ["write", "draft", "prepare", "compose", "ask gemini", "ask chatgpt", "mail to", "email to", "send", "mail ", "email "]):
             return self._build_workflow_b_email(clean)
 
         # 3. Specialized Workflow C: Programming Assistance (Run, Diagnose, Fix)
@@ -114,56 +114,132 @@ class TaskPlanner:
     def _build_workflow_b_email(self, instruction: str) -> ExecutionPlan:
         """Workflow B: Professional Email Preparation with Human-in-the-Loop Approval."""
         plan_id = str(uuid.uuid4())
+        lower_inst = instruction.lower()
+
+        # Check if user asked for real Chrome browser / Gmail automation
+        is_browser_gmail = any(k in lower_inst for k in ["profile", "gmail", "compose", "mail to", "email to"])
+        if not is_browser_gmail:
+            steps = [
+                TaskStep(
+                    step_id="step_1",
+                    description="Generate professional email draft",
+                    tool_name="generate_ai_response",
+                    input_params={
+                        "prompt": f"Write a professional, compelling email draft based on this request: {instruction}",
+                        "provider": "gemini" if "gemini" in lower_inst else "",
+                        "system_prompt": "You are a professional communication assistant. Produce a complete email with Subject line and body.",
+                    },
+                    expected_output="Polished email draft with Subject and Body",
+                    active_application="Google Gemini",
+                ),
+                TaskStep(
+                    step_id="step_2",
+                    description="Wait for user review and approval of the generated email draft",
+                    tool_name="request_user_approval",
+                    input_params={
+                        "action_name": "Review Email Draft",
+                        "details": "${step_1.content}",
+                    },
+                    expected_output="User confirmation or revised guidance",
+                    dependencies=["step_1"],
+                    risk_level=RiskLevel.APPROVAL_REQUIRED,
+                    requires_approval=True,
+                    approval_prompt="Please review the generated email draft. Do you approve proceeding to send it?",
+                    active_application="User Interaction",
+                ),
+                TaskStep(
+                    step_id="step_3",
+                    description="Deliver approved email via configured provider",
+                    tool_name="send_email",
+                    input_params={
+                        "to": "recipient@example.com",
+                        "subject": "Email from BOLT Assistant",
+                        "body": "${step_1.content}",
+                    },
+                    expected_output="Email dispatch confirmation",
+                    dependencies=["step_2"],
+                    risk_level=RiskLevel.HIGH_RISK,
+                    requires_approval=True,
+                    active_application="Email System",
+                ),
+            ]
+            return ExecutionPlan(
+                plan_id=plan_id,
+                title="Email Preparation & Approval",
+                user_instruction=instruction,
+                steps=steps,
+            )
+
+        # 1. Extract requested profile if mentioned
+        profile_name = "Default"
+        prof_match = re.search(r"(?:profile\s+(?:called\s+|named\s+)?([a-zA-Z0-9_\-\s]+?)|(?:select\s+)?(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|last)(?:\s+(?:one|of\s+them|profile))?)(?:\s+and|\s+open|\s+navigate|\s+to|\.|$)", instruction, re.IGNORECASE)
+        if prof_match:
+            cand = (prof_match.group(1) or prof_match.group(2) or "").strip()
+            cand = re.sub(r"\s+(?:open|navigate|go|and|mail|send)$", "", cand).strip()
+            if cand:
+                profile_name = cand
+
+        # 2. Extract recipient email or target person
+        email_match = re.search(r"\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,})\b", instruction)
+        if email_match:
+            recipient = email_match.group(1)
+        else:
+            to_match = re.search(r"(?:to|mail|email)\s+(?:person\s+|user\s+)?([a-zA-Z0-9_\-\.]+@[a-zA-Z0-9_\-\.]+|[a-zA-Z0-9_\-\s]+?)(?:\s+with|\s+saying|\s+about|\.|$)", instruction, re.IGNORECASE)
+            recipient = to_match.group(1).strip() if to_match and to_match.group(1).strip() else "test@example.com"
+            if "@" not in recipient:
+                recipient = "test@example.com"
+
+        # 3. Extract subject & body
+        subj_match = re.search(r"subject\s*[:'\"]?([^'\"\n,]+)['\"]?", instruction, re.IGNORECASE)
+        subject = subj_match.group(1).strip() if subj_match else "Important Update regarding your request"
+
+        body = (
+            "Hello,\n\n"
+            "This is a verified test draft prepared by BOLT.\n"
+            "No email has been sent without explicit authorization."
+        )
+        body_match = re.search(r"(?:body|saying|text|message)\s*[:'\"]?([^'\"]+)['\"]?", instruction, re.IGNORECASE)
+        if body_match:
+            body = body_match.group(1).strip()
 
         steps = [
             TaskStep(
                 step_id="step_1",
-                description="Generate professional email draft",
-                tool_name="generate_ai_response",
+                description=f"Select and activate Google Chrome profile '{profile_name}'",
+                tool_name="select_browser_profile",
                 input_params={
-                    "prompt": f"Write a professional, compelling email draft based on this request: {instruction}",
-                    "provider": "gemini" if "gemini" in instruction.lower() else "",
-                    "system_prompt": "You are a professional communication assistant. Produce a complete email with Subject line and body.",
+                    "profile_name": profile_name,
+                    "new_window": any(k in instruction.lower() for k in ["new chrome", "new window", "new browser", "brand new"]),
                 },
-                expected_output="Polished email draft with Subject and Body",
-                active_application="Google Gemini",
+                expected_output=f"Chrome window for profile '{profile_name}' active",
+                active_application="Google Chrome",
             ),
             TaskStep(
                 step_id="step_2",
-                description="Wait for user review and approval of the generated email draft",
-                tool_name="request_user_approval",
-                input_params={
-                    "action_name": "Review Email Draft",
-                    "details": "${step_1.content}",
-                },
-                expected_output="User confirmation or revised guidance",
+                description="Navigate browser to Gmail",
+                tool_name="navigate_browser_url",
+                input_params={"url": "https://mail.google.com/"},
+                expected_output="Gmail web interface loaded",
                 dependencies=["step_1"],
-                risk_level=RiskLevel.APPROVAL_REQUIRED,
-                requires_approval=True,
-                approval_prompt="Please review the generated email draft. Do you approve proceeding with this draft?",
+                active_application="Gmail Web",
             ),
             TaskStep(
                 step_id="step_3",
-                description="Open Gmail to prepare message draft",
-                tool_name="open_website",
-                input_params={"website_name_or_url": "gmail"},
-                expected_output="Gmail web interface opened",
+                description="Wait for Gmail interface and Compose control to be ready",
+                tool_name="wait_for_browser_element",
+                input_params={"element_name": "Compose", "timeout_seconds": 12.0},
+                expected_output="Compose button verified visible",
                 dependencies=["step_2"],
                 active_application="Gmail Web",
             ),
             TaskStep(
                 step_id="step_4",
-                description="Require explicit user approval before sending email to recipient",
-                tool_name="request_user_approval",
-                input_params={
-                    "action_name": "Send Email",
-                    "details": "Ready to send approved email message via Gmail.",
-                },
-                expected_output="User final approval before sending",
+                description=f"Draft email message to {recipient} with subject '{subject}'",
+                tool_name="draft_browser_email",
+                input_params={"recipient": recipient, "subject": subject, "body": body},
+                expected_output="Email draft verified in Gmail",
                 dependencies=["step_3"],
-                risk_level=RiskLevel.HIGH_RISK,
-                requires_approval=True,
-                approval_prompt="⚠️ HIGH RISK ACTION: Do you explicitly authorize sending this email now?",
+                active_application="Gmail Web",
             ),
         ]
 
@@ -433,24 +509,119 @@ class TaskPlanner:
                         active_application="Active Application",
                     ))
 
+            # 4.5. Browser Profile selection
+            elif "profile" in clause or any(k in clause for k in ["first of them", "second of them", "select first", "select 1st", "select second", "select 2nd", "select third", "first one", "second one"]):
+                prof_match = re.search(r"(?:profile\s+(?:called\s+|named\s+)?([a-zA-Z0-9_\-\s]+)|(?:select\s+)?(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|last)(?:\s+(?:one|of\s+them|profile))?)", clause, re.IGNORECASE)
+                prof_name = "Default"
+                if prof_match:
+                    cand = (prof_match.group(1) or prof_match.group(2) or "").strip()
+                    cand = re.sub(r"\s+(?:open|navigate|go|and|mail|send)$", "", cand).strip()
+                    if cand:
+                        prof_name = cand
+                deps = [prev_step_id] if prev_step_id else []
+                steps.append(TaskStep(
+                    step_id=step_id,
+                    description=f"Select and activate Chrome profile: {prof_name}",
+                    tool_name="select_browser_profile",
+                    input_params={"profile_name": prof_name},
+                    expected_output=f"Chrome profile '{prof_name}' activated",
+                    dependencies=deps,
+                    active_application="Google Chrome",
+                ))
+
+            # 4.6. Browser Click / Compose
+            elif "compose" in clause or ("click" in clause and "button" in clause):
+                target_btn = "Compose" if "compose" in clause else re.sub(r"^(?:click\s+(?:the\s+)?|press\s+(?:the\s+)?)", "", clause).strip()
+                target_btn = target_btn.replace("button", "").strip()
+                deps = [prev_step_id] if prev_step_id else []
+                steps.append(TaskStep(
+                    step_id=step_id,
+                    description=f"Click browser element: {target_btn}",
+                    tool_name="click_browser_element",
+                    input_params={"element_name": target_btn},
+                    expected_output=f"Clicked '{target_btn}' in browser",
+                    dependencies=deps,
+                    active_application="Google Chrome",
+                ))
+
+            # 4.7. Browser Email Draft
+            elif any(k in clause for k in ["mail to", "email to", "send email", "draft email", "mail ", "email "]):
+                email_direct = re.search(r"([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,})", clause)
+                to_match = re.search(r"(?:to|mail|email)\s+([a-zA-Z0-9_\-\.]+@[a-zA-Z0-9_\-\.]+|[a-zA-Z0-9_\-\s]+?)(?:\s+with|\.|$)", clause)
+                if email_direct:
+                    recipient = email_direct.group(1)
+                else:
+                    recipient = to_match.group(1).strip() if to_match and to_match.group(1).strip() else "test@example.com"
+                if "@" not in recipient:
+                    recipient = "test@example.com"
+                deps = [prev_step_id] if prev_step_id else []
+                steps.append(TaskStep(
+                    step_id=step_id,
+                    description=f"Draft email to {recipient} in Gmail",
+                    tool_name="draft_browser_email",
+                    input_params={
+                        "recipient": recipient,
+                        "subject": "Important update regarding your request",
+                        "body": "Hello,\n\nThis is a verified test draft prepared by BOLT.\nNo email has been sent.",
+                    },
+                    expected_output="Verified email draft prepared in Gmail",
+                    dependencies=deps,
+                    active_application="Gmail Web",
+                ))
+
             # 5. Open app or site action
-            elif "open" in clause or "launch" in clause:
-                target = re.sub(r"^(?:open|launch|start|run)\s+", "", clause).strip()
-                if any(b in target for b in ["chrome", "edge", "firefox", "browser", "chatgpt", "gemini", "google", "gmail", "youtube"]) or target.startswith("http"):
+            elif "open" in clause or "launch" in clause or "go to" in clause or "navigate to" in clause:
+                target = re.sub(r"^(?:open|launch|start|run|go\s+to|navigate\s+to)\s+", "", clause).strip()
+                clean_target = re.sub(r"^(?:the\s+|a\s+|my\s+)", "", target).strip()
+                deps = [prev_step_id] if prev_step_id else []
+
+                if "gmail" in clean_target:
                     steps.append(TaskStep(
                         step_id=step_id,
-                        description=f"Open web target: {target}",
-                        tool_name="open_website",
-                        input_params={"website_name_or_url": target},
-                        expected_output="Web page opened",
+                        description="Navigate browser to Gmail",
+                        tool_name="navigate_browser_url",
+                        input_params={"url": "https://mail.google.com/"},
+                        expected_output="Gmail web page opened",
                         dependencies=deps,
-                        active_application="Browser",
+                        active_application="Google Chrome",
                     ))
+                elif "chrome" in clean_target:
                     steps.append(TaskStep(
                         step_id=step_id,
-                        description=f"Open web target: {target}",
+                        description="Open Google Chrome browser",
+                        tool_name="open_application",
+                        input_params={"app_name": "Google Chrome"},
+                        expected_output="Google Chrome opened",
+                        dependencies=deps,
+                        active_application="Google Chrome",
+                    ))
+                elif any(b in clean_target for b in ["browser", "web browser"]):
+                    if len(clauses) > 1 and any("search" in cl for cl in clauses):
+                        steps.append(TaskStep(
+                            step_id=step_id,
+                            description="Open web browser",
+                            tool_name="open_website",
+                            input_params={"website_name_or_url": "google.com"},
+                            expected_output="Web browser opened",
+                            dependencies=deps,
+                            active_application="Browser",
+                        ))
+                    else:
+                        steps.append(TaskStep(
+                            step_id=step_id,
+                            description="Open Google Chrome browser",
+                            tool_name="open_application",
+                            input_params={"app_name": "Google Chrome"},
+                            expected_output="Google Chrome opened",
+                            dependencies=deps,
+                            active_application="Google Chrome",
+                        ))
+                elif clean_target.startswith("http") or any(b in clean_target for b in ["chatgpt", "gemini", "google", "youtube"]):
+                    steps.append(TaskStep(
+                        step_id=step_id,
+                        description=f"Open web target: {clean_target}",
                         tool_name="open_website",
-                        input_params={"website_name_or_url": target},
+                        input_params={"website_name_or_url": clean_target},
                         expected_output="Web page opened",
                         dependencies=deps,
                         active_application="Browser",
@@ -458,12 +629,12 @@ class TaskPlanner:
                 else:
                     steps.append(TaskStep(
                         step_id=step_id,
-                        description=f"Open desktop application: {target}",
+                        description=f"Open desktop application: {clean_target}",
                         tool_name="open_application",
-                        input_params={"app_name": target},
+                        input_params={"app_name": clean_target},
                         expected_output="Application opened",
                         dependencies=deps,
-                        active_application=target.title(),
+                        active_application=clean_target.title(),
                     ))
 
             # 6. Fallback generic clause

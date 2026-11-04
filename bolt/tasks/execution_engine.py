@@ -221,6 +221,7 @@ class ExecutionEngine:
                 step.status = TaskStatus.WAITING_APPROVAL
                 plan.status = TaskStatus.WAITING_APPROVAL
                 self._waiting_approval_step = step
+                setattr(step, "_tool_completed_waiting", True)
                 prompt = res.get("question") or res.get("details") or step.description
                 if self.on_approval_needed:
                     self.on_approval_needed(plan.plan_id, step.step_id, step.description, prompt)
@@ -279,7 +280,7 @@ class ExecutionEngine:
             if user_response:
                 step.input_params["user_response"] = user_response
 
-            if step.tool_name in ("request_user_approval", "ask_user_input"):
+            if step.tool_name in ("request_user_approval", "ask_user_input") or getattr(step, "_tool_completed_waiting", False):
                 step.status = TaskStatus.COMPLETED
                 step.result = {"approved": True, "user_response": user_response}
                 step.completed_at = utc_now_iso()
